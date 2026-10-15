@@ -4,7 +4,7 @@ layout(binding = 1) uniform sampler2D uShadow;  // shadow map: window depth pack
 layout(std140, binding = 1) uniform fs_ub {
   vec4 fF[38];
   vec4 uTint;  // rgb tint (linear), w: emissive scale
-  vec4 uOpt;   // x: debug view, y: DFG multiscatter, z: 1 = decode uTex sRGB in shader (no HW sRGB), w: shadow map size
+  vec4 uOpt;   // x: debug view, y: DFG multiscatter, z: bit0 decode uTex sRGB in shader, bit1 aniso emulation, w: shadow map size
 };
 #include "pb_frame.glsl"
 #include "pb_sky.glsl"
@@ -15,7 +15,20 @@ layout(location = 7) in vec3 vI2;
 #endif
 layout(location = 0) out vec4 oCol;
 vec3 s2l(vec3 c) { return mix(c * 0.0773993808, pow(c * 0.9478672986 + 0.0521327014, vec3(2.4)), step(0.04045, c)); }
-vec4 texA(vec2 uv) { vec4 t = texture(uTex, uv); if (uOpt.z > 0.5) t.rgb = s2l(t.rgb); return t; }
+// uOpt.z bit 0: sRGB decode in the shader (ax::backend has no sRGB format); bit 1: anisotropic filtering emulation
+// (ax::backend has no anisotropy API): up to 8 trilinear taps along the footprint's major axis, like max aniso 8.
+vec4 texA(vec2 uv) {
+  int fl = int(uOpt.z + 0.5); bool srgb = (fl & 1) != 0;
+  vec2 dx = dFdx(uv), dy = dFdy(uv);
+  if ((fl & 2) == 0) { vec4 t = texture(uTex, uv); if (srgb) t.rgb = s2l(t.rgb); return t; }
+  vec2 sz = vec2(textureSize(uTex, 0)); float lx = length(dx * sz), ly = length(dy * sz);
+  bool xMajor = lx > ly; float n = clamp(ceil(max(lx, ly) / max(min(lx, ly), 1e-6)), 1.0, 8.0);
+  vec2 major = xMajor ? dx : dy; vec2 gx = xMajor ? dx / n : dx, gy = xMajor ? dy : dy / n;
+  int N = int(n); vec4 t = vec4(0.0);
+  for (int i = 0; i < 8; i++) { if (i >= N) break;
+    vec4 s = textureGrad(uTex, uv + major * ((float(i) + 0.5) / n - 0.5), gx, gy); if (srgb) s.rgb = s2l(s.rgb); t += s; }
+  return t / n;
+}
 vec3 brdf(vec3 N, vec3 V, vec3 L, vec3 diffC, vec3 F0, float a) {
   float ndl = max(dot(N, L), 0.0); if (ndl <= 0.0) return vec3(0.0);
   vec3 H = (L + V) * inversesqrt(max(dot(L + V, L + V), 1e-12)); float ndh = max(dot(N, H), 0.0); float ndv = max(dot(N, V), 1e-3);
