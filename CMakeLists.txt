@@ -40,6 +40,20 @@ set(CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules
 )
 
+# Render backend: our 3D layer (Source/gfx) is raw OpenGL, so every platform must get a GL context.
+#  - Windows: native desktop GL 3.3 core (axmol default would be ANGLE/GLES)
+#  - macOS/iOS: OpenGL instead of Metal (axmol default is Metal)
+#  - Android: GLES 3.0 (axmol default profile is 2.0)
+#  - Linux: desktop GL 3.3 core (default); WASM: WebGL2 / GLES 3.0 (default)
+if(WIN32 AND NOT WINRT)
+  set(AX_USE_COMPAT_GL OFF CACHE BOOL "PelicanBike: native desktop GL" FORCE)
+elseif(APPLE)
+  set(AX_USE_COMPAT_GL ON CACHE BOOL "PelicanBike: OpenGL instead of Metal" FORCE)
+endif()
+if(ANDROID)
+  set(AX_GLES_PROFILE 300 CACHE STRING "PelicanBike: GLES 3.0" FORCE)
+endif()
+
 # NOTE: The order of the cmake module "include(AXGame...)" statements matters
 include(AXGameEngineOptions)
 include(AXGameEngineSetup)
@@ -105,6 +119,12 @@ if(_AX_TESTS)
 endif()
 
 include(AXGameTargetSetup)
+
+if(MSVC)
+  # UTF-8 sources (Chinese UI strings), M_PI
+  target_compile_options(${APP_NAME} PRIVATE /utf-8 /bigobj)
+  target_compile_definitions(${APP_NAME} PRIVATE _USE_MATH_DEFINES _CRT_SECURE_NO_WARNINGS NOMINMAX)
+endif()
 
 # mark app resources, resource will be copy auto after mark
 ax_setup_app_config(${APP_NAME})

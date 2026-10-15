@@ -121,7 +121,7 @@ void Game::drawAdditive() {
   if (beamN > 0.001f) { beamS.use(); glUniform1f(beamS.loc("uNight"), beamN); for (int i = 0; i < 2; i++) { glUniformMatrix4fv(beamS.loc("uModel"), 1, GL_FALSE, beamM[i].m); lhBeam.draw(); } }
   if (poolO > 0.001f) { poolS.use(); glUniform1f(poolS.loc("uOpacity"), poolO); ax::Mat4 M; ax::Mat4::createTranslation(F.cloudOff[2], 0, 0, &M); glUniformMatrix4fv(poolS.loc("uModel"), 1, GL_FALSE, M.m); pools.draw(); }
   if (ffN > 0.001f) {
-#if AX_TARGET_PLATFORM != AX_PLATFORM_WASM
+#if PB_DESKTOP_GL
     glEnable(GL_PROGRAM_POINT_SIZE);
 #endif
     ffS.use(); glUniform1f(ffS.loc("uNight"), ffN); glUniform1f(ffS.loc("uOffset"), float(std::fmod(S.distance, 200.0))); ffMesh.draw(); }

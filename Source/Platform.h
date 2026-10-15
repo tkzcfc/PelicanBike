@@ -3,6 +3,7 @@
 #include <string>
 #include <functional>
 namespace plat {
+void setEnv(const char* k, const std::string& v);  // portable setenv (MSVC: _putenv_s)
 void toggleFullscreen();
 bool copyText(const std::string& s);
 void openUrl(const std::string& u);

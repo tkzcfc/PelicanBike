@@ -1,6 +1,5 @@
 #include "audio/Synth.h"
-#include <AL/al.h>
-#include <AL/alc.h>
+#include "audio/oal_port.h"  // engine OpenAL headers (openal-soft or Apple OpenAL per platform)
 #include <cmath>
 #include <cstdio>
 #include <algorithm>

@@ -259,7 +259,7 @@ bool Game::init(int winW, int winH) {
   shadowRT.create(settings.shadowSize, settings.shadowSize, 0, true);
   createTargets(winW, winH);
 #ifdef GL_TIME_ELAPSED
-#  if AX_TARGET_PLATFORM != AX_PLATFORM_WASM
+#  if PB_DESKTOP_GL
   glGenQueries(2, gpuQuery); gpuQueryOk = true;
 #  endif
 #endif
@@ -648,10 +648,10 @@ void Game::render(int winW, int winH) {
   glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo); glGetIntegerv(GL_VIEWPORT, prevVp); glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVao); glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
   if (targetsDirty) { shadowRT.create(settings.shadowSize, settings.shadowSize, 0, true); createTargets(winW, winH); targetsDirty = false; }
   if (int(winW * settings.renderScale) != rtW || int(winH * settings.renderScale) != rtH) createTargets(winW, winH);
-#if AX_TARGET_PLATFORM != AX_PLATFORM_WASM
+#if PB_DESKTOP_GL
   if (gpuQueryOk && frameNo > 2) { GLuint64 ns = 0; GLint avail = 0; glGetQueryObjectiv(gpuQuery[(frameNo + 1) & 1], GL_QUERY_RESULT_AVAILABLE, &avail); if (avail) { glGetQueryObjectui64v(gpuQuery[(frameNo + 1) & 1], GL_QUERY_RESULT, &ns); gpuMs = ns / 1e6f; } }
 #endif
-#if defined(GL_TIME_ELAPSED) && AX_TARGET_PLATFORM != AX_PLATFORM_WASM
+#if defined(GL_TIME_ELAPSED) && PB_DESKTOP_GL
   if (gpuQueryOk) glBeginQuery(GL_TIME_ELAPSED, gpuQuery[frameNo & 1]);
 #endif
   ax::Mat4::createPerspective(fov, float(winW) / winH, 0.05f, 900.f, &proj);
@@ -688,7 +688,8 @@ void Game::render(int winW, int winH) {
     glBindFramebuffer(GL_FRAMEBUFFER, hdrRT.fbo); glReadPixels(0, 0, rtW, rtH, GL_RGBA, GL_FLOAT, px.data());
     FILE* f = fopen(std::getenv("PB2_DUMPHDR"), "wb"); if (f) { fwrite(&rtW, 4, 1, f); fwrite(&rtH, 4, 1, f); fwrite(px.data(), 4, px.size(), f); fclose(f); }
   }
-  if (static bool sw = std::getenv("PB2_SWEEP") != nullptr; sw) {  // NaN/Inf audit while sweeping hour (PB2_SWEEP=step)
+  static const bool sweepOn = std::getenv("PB2_SWEEP") != nullptr;
+  if (sweepOn) {  // NaN/Inf audit while sweeping hour (PB2_SWEEP=step)
     settings.hour = std::fmod(settings.hour + float(std::atof(std::getenv("PB2_SWEEP"))), 24.f);
     std::vector<float> px(size_t(rtW) * rtH * 4); glBindFramebuffer(GL_FRAMEBUFFER, hdrRT.fbo); glReadPixels(0, 0, rtW, rtH, GL_RGBA, GL_FLOAT, px.data());
     int bad = 0, fb = -1; float mx = 0; for (size_t i = 0; i < px.size(); i++) { if (!std::isfinite(px[i])) { if (!bad) fb = int(i / 4); bad++; } else mx = std::max(mx, px[i]); }
@@ -738,7 +739,7 @@ void Game::render(int winW, int winH) {
   for (int i = 0; i < 5; i++) { glActiveTexture(GL_TEXTURE2 + i); glBindTexture(GL_TEXTURE_2D, bloomA[i].color.id); }
   glActiveTexture(GL_TEXTURE0);
   drawFullscreen();
-#if defined(GL_TIME_ELAPSED) && AX_TARGET_PLATFORM != AX_PLATFORM_WASM
+#if defined(GL_TIME_ELAPSED) && PB_DESKTOP_GL
   if (gpuQueryOk) glEndQuery(GL_TIME_ELAPSED);
 #endif
   // restore for Axmol

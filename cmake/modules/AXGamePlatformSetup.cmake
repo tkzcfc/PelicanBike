@@ -1,7 +1,7 @@
 if(APPLE)
   set_target_properties(${APP_NAME} PROPERTIES RESOURCE "${APP_UI_RES}")
   set_xcode_property(${APP_NAME} INSTALL_PATH "\$(LOCAL_APPS_DIR)")
-  set_xcode_property(${APP_NAME} PRODUCT_BUNDLE_IDENTIFIER "dev.axmol.dummy")
+  set_xcode_property(${APP_NAME} PRODUCT_BUNDLE_IDENTIFIER "com.tkzcfc.pelicanbike")
 
   if(MACOSX)
     set_target_properties(${APP_NAME} PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/proj.ios_mac/mac/Info.plist")
@@ -32,7 +32,7 @@ if (_AX_TESTS)
   if(MACOSX)
     set_target_properties(${TEST_TARGET_NAME} PROPERTIES RESOURCE "${APP_UI_RES}")
     set_xcode_property(${TEST_TARGET_NAME} INSTALL_PATH "\$(LOCAL_APPS_DIR)")
-    set_xcode_property(${TEST_TARGET_NAME} PRODUCT_BUNDLE_IDENTIFIER "dev.axmol.dummy-test")
+    set_xcode_property(${TEST_TARGET_NAME} PRODUCT_BUNDLE_IDENTIFIER "com.tkzcfc.pelicanbike-test")
     set_target_properties(${TEST_TARGET_NAME} PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/proj.ios_mac/mac/Info.plist")
 
     # For code-signing, set the DEVELOPMENT_TEAM:

@@ -3,6 +3,12 @@
 // Axmol's GL state cache afterwards (OpenGLState::reset), so Axmol keeps doing 2D/HUD.
 #pragma once
 #include "platform/GL.h"
+// desktop GL 3.3 core (Linux/Windows/macOS) vs GLES 3.0 (Android, WebGL2): gates desktop-only calls (timer queries, PROGRAM_POINT_SIZE)
+#if AX_TARGET_PLATFORM == AX_PLATFORM_WASM || (defined(AX_GLES_PROFILE) && AX_GLES_PROFILE)
+#  define PB_DESKTOP_GL 0
+#else
+#  define PB_DESKTOP_GL 1
+#endif
 #include <cstdint>
 #include <string>
 #include <vector>

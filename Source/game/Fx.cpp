@@ -235,7 +235,7 @@ void Game::drawFxTransparent() {
   Col cy = hexLin(0x7fe3ff), gd = hexLin(0xffd257); int nHalo = 0;
   for (auto& f : fishes) if (f.active && f.caught < 0) { Col c = f.golden ? gd : cy; buf.insert(buf.end(), {f.pos.x, f.pos.y, f.pos.z, c.r, c.g, c.b, f.haloA, 0.9f}); nHalo++; }
   if (!buf.empty()) {
-#if AX_TARGET_PLATFORM != AX_PLATFORM_WASM
+#if PB_DESKTOP_GL
     glEnable(GL_PROGRAM_POINT_SIZE);
 #endif
     glBindBuffer(GL_ARRAY_BUFFER, partVbo); glBufferSubData(GL_ARRAY_BUFFER, 0, std::min<size_t>(buf.size(), 1300 * 8) * 4, buf.data());

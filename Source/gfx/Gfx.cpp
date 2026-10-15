@@ -12,7 +12,7 @@ Stats g_stats;
 static GLuint s_emptyVao = 0;
 
 const char* glslHeader() {
-#if AX_TARGET_PLATFORM == AX_PLATFORM_WASM || defined(AX_GLES_PROFILE) && AX_GLES_PROFILE
+#if !PB_DESKTOP_GL
     return "#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler2D;\nprecision highp sampler2DShadow;\n";
 #else
     return "#version 330 core\n";

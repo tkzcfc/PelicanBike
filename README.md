@@ -69,6 +69,15 @@ python3 tools/wasm_serve.py --root build_wasm/bin/PelicanBike --port 8089
 ```
 `wasm_serve.py` 会附带 COOP/COEP/CORP 响应头，所以不能直接双击 html 打开。`bash tools/package_zip.sh` 会把构建结果打包成 `PelicanBike_web.zip`（包含 web/、wasm_serve.py、启动.bat、说明.txt）。
 
+## 持续集成 / 发布 / 在线试玩
+- 工作流 `.github/workflows/build.yml` 会在 CI 里克隆官方 Axmol `release/2.x` 并运行 `setup.ps1`（引擎和工具链会缓存），然后调用 `tools/ci/build.ps1`（即 `axmol -p <平台> -O3`）。
+- **推送 `v*` 标签**（例如 `git tag v1.0.0 && git push origin v1.0.0`）会构建 Windows x64（MSVC）、macOS arm64（.app 打成 zip）、Android arm64 APK 和 Web，并把 `PelicanBike-windows-x64.zip`、`PelicanBike-macos.zip`、`PelicanBike-android.apk`、`PelicanBike-web.zip` 上传到该标签的 GitHub Release。也可以在 Actions 页面手动运行（workflow_dispatch），手动运行只产出 artifacts。
+- **推送到 `main`** 只构建 Web 并部署到 GitHub Pages：**https://tkzcfc.github.io/PelicanBike/**。Web 版是单线程的（`AX_WASM_THREADS=0`），不需要 COOP/COEP 响应头。
+- 需要先启用 Pages：仓库 Settings → Pages → Build and deployment → **Source = GitHub Actions**。
+- Android 签名（可选）：在仓库 Secrets 里配置 `ANDROID_KEYSTORE_BASE64`（keystore 文件的 base64）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。不配置时 release APK 用 debug key 签名（可以安装，但不能上架）。
+- macOS 包没有签名和公证：首次打开时请右键 → 打开，或者运行 `xattr -dr com.apple.quarantine PelicanBike.app`。
+- 渲染后端：自研 3D 层使用 OpenGL，所以 `CMakeLists.txt` 强制 Windows 使用原生 GL 3.3（不用 ANGLE），macOS 使用 OpenGL（不用 Metal），Android 使用 GLES 3.0。
+
 ## 用到的 Axmol 能力
 - 窗口与 GL 上下文（`RenderViewImpl`，桌面 GL 3.3 core / WebGL2）、Director 主循环
 - 输入：`EventListenerKeyboard`、`EventListenerMouse`、`EventListenerTouchAllAtOnce`

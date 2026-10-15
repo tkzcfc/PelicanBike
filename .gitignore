@@ -7,3 +7,14 @@ ref/
 tools/node_modules/
 .vscode/
 .idea/
+
+# CI / cmdline build outputs
+build_*/
+install_*/
+dist/
+proj.android/.gradle/
+proj.android/app/build/
+proj.android/build/
+proj.android/local.properties
+proj.android/.cxx/
+proj.android/app/.cxx/

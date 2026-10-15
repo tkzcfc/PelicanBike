@@ -18,7 +18,7 @@ bool MainScene::init() {
   if (env("PB2_FREEZE")) _game.settings.timeFlow = false;
   if (auto v = env("PB2_SCALE")) _game.settings.renderScale = std::atof(v);
   if (auto v = env("PB2_MSAA")) _game.settings.msaa = std::atoi(v);
-  { auto cu = plat::urlParam("cam"); if (!cu.empty() && !env("PB2_CAM")) setenv("PB2_CAM", cu.c_str(), 1); }
+  { auto cu = plat::urlParam("cam"); if (!cu.empty() && !env("PB2_CAM")) plat::setEnv("PB2_CAM", cu); }
   if (auto v = env("PB2_CAM")) { std::string c(v); _game.camMode = c == "side" ? 2 : c == "orbit" ? 0 : c == "cine" ? 3 : c == "pov" ? 4 : 1; }
   if (auto v = env("PB2_HOLD")) { _holdAt = std::atof(v); }
   if (auto v = env("PB2_DT")) _fixedDt = std::atof(v);
