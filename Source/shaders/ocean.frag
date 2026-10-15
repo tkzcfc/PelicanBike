@@ -1,6 +1,6 @@
 #version 310 es
 #include "pb_fs_head.glsl"
-layout(std140, binding = 1) uniform fs_ub { vec4 fF[38]; };
+layout(std140) uniform fs_ub { vec4 fF[38]; };
 #include "pb_frame.glsl"
 #include "pb_sky.glsl"
 layout(location = 0) in vec3 vWorld; layout(location = 1) in vec3 vNormal; layout(location = 2) in float vHeight; layout(location = 3) in vec2 vWP;

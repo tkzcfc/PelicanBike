@@ -3,7 +3,7 @@
 #include "pb_post.glsl"
 // sanitize + luminosity high pass (UnrealBloomPass LuminosityHighPassShader, smoothWidth 0.01)
 layout(binding = 0) uniform sampler2D uSrc;
-layout(std140, binding = 1) uniform fs_ub { vec4 uThreshold; };  // x threshold, y manual bilinear
+layout(std140) uniform fs_ub { vec4 uThreshold; };  // x threshold, y manual bilinear
 float fixf(float x) { uint b = floatBitsToUint(x); if ((b & 0x7f800000u) == 0x7f800000u) return ((b & 0x007fffffu) == 0u && (b & 0x80000000u) == 0u) ? 48.0 : 0.0; return clamp(x, 0.0, 48.0); }
 layout(location = 0) in vec2 vUv;
 layout(location = 0) out vec4 oCol;

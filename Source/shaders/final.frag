@@ -5,7 +5,7 @@ layout(binding = 0) uniform sampler2D uHdr;
 layout(binding = 2) uniform sampler2D uB0; layout(binding = 3) uniform sampler2D uB1; layout(binding = 4) uniform sampler2D uB2;
 layout(binding = 5) uniform sampler2D uB3; layout(binding = 6) uniform sampler2D uB4;
 layout(binding = 7) uniform sampler2D uBlur;
-layout(std140, binding = 1) uniform fs_ub {
+layout(std140) uniform fs_ub {
   vec4 uBloomF;   // factors 0..3 (pre-multiplied by strength)
   vec4 uGrade;    // x factor4, y vignette, z warm, w grain
   vec4 uExpTime;  // x exposure, y time, z backdrop rect count, w framebuffer height (px)

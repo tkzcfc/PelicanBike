@@ -1,6 +1,6 @@
 #version 310 es
 precision highp float;
-layout(std140, binding = 1) uniform fs_ub { vec4 uHalo; };
+layout(std140) uniform fs_ub { vec4 uHalo; };
 layout(location = 0) in vec4 vC;
 layout(location = 0) out vec4 oCol;
 void main() { float d = length(gl_PointCoord - 0.5); float a;

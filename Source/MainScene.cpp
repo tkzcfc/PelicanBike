@@ -4,6 +4,8 @@
 #include "Platform.h"
 #include <cstdlib>
 #include <cstdio>
+#include <cmath>
+#include <algorithm>
 USING_NS_AX;
 
 static const char* env(const char* k) { const char* v = std::getenv(k); return v && *v ? v : nullptr; }
@@ -41,9 +43,53 @@ bool MainScene::init() {
         if (!camParam) _game.setCamMode(0); _startToast = 0.9f; _hudFade = 0.001f; _hud->setCascadeOpacityEnabled(true); _hud->setOpacity(0); _hud->setVisible(true); }; } }
   { bool coarse = env("PB2_TOUCH") != nullptr || plat::coarsePointer(); _hud->setTouchMode(coarse);
     auto tl = EventListenerTouchAllAtOnce::create();
-    tl->onTouchesBegan = [this](const std::vector<Touch*>& ts, Event*) { for (auto* t : ts) { if (_intro) _intro->mouseDown(t->getLocation()); else _hud->touchDown(t->getID(), t->getLocation()); } };
-    tl->onTouchesMoved = [this](const std::vector<Touch*>& ts, Event*) { for (auto* t : ts) _hud->touchMove(t->getID(), t->getLocation()); };
-    tl->onTouchesEnded = [this](const std::vector<Touch*>& ts, Event*) { for (auto* t : ts) _hud->touchUp(t->getID()); };
+#if AX_TARGET_PLATFORM == AX_PLATFORM_ANDROID || AX_TARGET_PLATFORM == AX_PLATFORM_IOS
+    // Phones/tablets get touch events only (no EventMouse), so the touch path must also do what the mouse path does:
+    // tap HUD buttons / chips, drag sliders, drag on the scene = orbit, tap on the scene = click, two fingers = pinch zoom.
+    // (WASM keeps the old split: browsers synthesise mouse events from touches, which drive the same actions there.)
+    static constexpr bool kNativeTouch = true;
+#else
+    static constexpr bool kNativeTouch = false;
+#endif
+    tl->onTouchesBegan = [this](const std::vector<Touch*>& ts, Event*) {
+      for (auto* t : ts) {
+        const int id = t->getID(); const Vec2 p = t->getLocation();
+        if (_intro) { _intro->mouseDown(p); continue; }
+        if (_hud->touchDown(id, p)) continue;  // on-screen pads / sliders
+        if (!kNativeTouch) continue;
+        if (_game.started) plat::resumeAudio();
+        if (_tPrimary < 0) {
+          _tPrimary = id;
+          if (_hud->mouseDown(p)) { _tHud = true; continue; }  // toolbar icons, camera chips, panels
+          _tHud = false; _down = true; _dragged = false; _downP = _lastP = p;
+        } else if (_tSecond < 0 && !_tHud) { _tSecond = id; _tSecondP = p; _pinchD = std::max(1.f, p.distance(_lastP)); _dragged = true; }
+      } };
+    tl->onTouchesMoved = [this](const std::vector<Touch*>& ts, Event*) {
+      for (auto* t : ts) {
+        const int id = t->getID(); const Vec2 p = t->getLocation();
+        _hud->touchMove(id, p);
+        if (!kNativeTouch) continue;
+        if (id == _tPrimary) {
+          if (_tHud) { _hud->mouseMove(p); continue; }
+          if (!_down) continue;
+          if (_tSecond >= 0) { float d = std::max(1.f, p.distance(_tSecondP)); _game.orbitZoom(std::log(_pinchD / d) / std::log(0.95f)); _pinchD = d; _lastP = p; continue; }
+          if (!_dragged && p.distance(_downP) > 10) { _dragged = true; if (_game.camMode != 0) _game.setCamMode(0); }
+          if (_dragged) _game.orbitDrag(p.x - _lastP.x, -(p.y - _lastP.y)); _lastP = p;
+        } else if (id == _tSecond) {
+          float d = std::max(1.f, p.distance(_lastP)); _game.orbitZoom(std::log(_pinchD / d) / std::log(0.95f)); _pinchD = d; _tSecondP = p;
+        }
+      } };
+    tl->onTouchesEnded = [this](const std::vector<Touch*>& ts, Event*) {
+      for (auto* t : ts) {
+        const int id = t->getID();
+        _hud->touchUp(id);
+        if (!kNativeTouch) continue;
+        if (id == _tSecond) { _tSecond = -1; continue; }
+        if (id != _tPrimary) continue;
+        if (_tHud) _hud->mouseUp();
+        else if (_down && !_dragged) { auto sz = Director::getInstance()->getVisibleSize(); Vec2 p = t->getLocation(); _game.clickAt(p.x / sz.width * 2 - 1, p.y / sz.height * 2 - 1); }
+        _tPrimary = -1; _tSecond = -1; _tHud = false; _down = false;
+      } };
     tl->onTouchesCancelled = tl->onTouchesEnded; _eventDispatcher->addEventListenerWithSceneGraphPriority(tl, this); }
   auto kl = EventListenerKeyboard::create();
   auto setKey = [this](EventKeyboard::KeyCode k, bool d) {

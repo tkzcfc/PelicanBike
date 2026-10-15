@@ -1,7 +1,7 @@
 #include "pb_fs_head.glsl"
 layout(binding = 0) uniform sampler2D uTex;
 layout(binding = 1) uniform sampler2D uShadow;  // shadow map: window depth packed into RGB8 (see shadow.frag), nearest
-layout(std140, binding = 1) uniform fs_ub {
+layout(std140) uniform fs_ub {
   vec4 fF[38];
   vec4 uTint;  // rgb tint (linear), w: emissive scale
   vec4 uOpt;   // x: debug view, y: DFG multiscatter, z: bit0 decode uTex sRGB in shader, bit1 aniso emulation, w: shadow map size

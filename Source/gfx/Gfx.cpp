@@ -185,7 +185,14 @@ void RenderTarget::create(int W, int H, ColorFmt fmt, bool withDepth, bool neare
         td.samplerDescriptor = bk::SamplerDescriptor(bk::SamplerFilter::NEAREST, bk::SamplerFilter::NEAREST, bk::SamplerAddressMode::CLAMP_TO_EDGE, bk::SamplerAddressMode::CLAMP_TO_EDGE);
         depth.t = driver()->newTexture(td); depth.w = w; depth.h = h;
     }
+#ifdef AX_USE_METAL
+    // D24S8 is a combined depth+stencil texture on Metal (Depth24Unorm_Stencil8 / Depth32Float_Stencil8 on Apple GPUs).
+    // A pipeline whose depthAttachmentPixelFormat is combined but stencilAttachmentPixelFormat is Invalid is rejected,
+    // so attach the same texture as stencil too (what ax::RenderTexture does). GL keeps the depth-only attachment.
+    rt = driver()->newRenderTarget(color.t, depth.t, depth.t);
+#else
     rt = driver()->newRenderTarget(color.t, depth.t, nullptr);
+#endif
 }
 void RenderTarget::destroy() {
     AX_SAFE_RELEASE_NULL(rt);
@@ -212,11 +219,16 @@ const Caps& caps() {
         s_caps.hdrLinear = ext("OES_texture_float_linear");
         s_caps.hdrRenderable = ext("EXT_color_buffer_float");
         s_caps.hdrBlend = ext("EXT_float_blend");
-    } else if (v.rfind("iOS", 0) == 0 || v.rfind("tvOS", 0) == 0) {  // Metal, Apple GPUs: no RGBA32Float filtering before Apple7/A14
-        s_caps.hdrLinear = false;
-    } else {  // desktop GL 3.3 core (float filtering is core since GL 3.0) or Metal on macOS
+    } else {  // desktop GL 3.3 core: float filtering is core since GL 3.0
         s_caps.hdrLinear = true;
     }
+#ifdef AX_USE_METAL
+    // Metal: RGBA32Float is only filterable on Apple7/8 when MTLDevice.supports32BitFloatFiltering (Apple9+ always),
+    // and ax::backend does not expose that query; the driver version string is a feature-set name ("macOS_GPUFamily..."
+    // / "iOS_GPUFamily..."), not something to pattern-match. Always use NEAREST + manual bilinear on Metal (exact same
+    // result as hardware LINEAR). Blending into RGBA32Float is supported on all Apple GPU families.
+    s_caps.hdrLinear = false;
+#endif
     if (const char* f = std::getenv("PB2_MANUAL_BILINEAR")) s_caps.hdrLinear = std::atoi(f) == 0;
     AXLOGI("[gfx] backend {} | RGBA32F linear {} renderable {} blend {}", s_caps.api, s_caps.hdrLinear, s_caps.hdrRenderable, s_caps.hdrBlend);
     if (!s_caps.hdrRenderable || !s_caps.hdrBlend) AXLOGW("[gfx] float render target / float blending not reported by the driver: HDR passes may fail");

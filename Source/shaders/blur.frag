@@ -2,7 +2,7 @@
 #include "pb_fs_head.glsl"
 #include "pb_post.glsl"
 layout(binding = 0) uniform sampler2D uSrc;
-layout(std140, binding = 1) uniform fs_ub {
+layout(std140) uniform fs_ub {
   vec4 uDirP;    // xy: texel step, z: pair count, w: centre weight
   vec4 uOW[11];  // x: paired-tap offset, y: weight
   vec4 uPostP;   // x: manual bilinear

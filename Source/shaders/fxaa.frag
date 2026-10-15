@@ -3,7 +3,7 @@
 // FXAA 3.11 (Timothy Lottes), PC quality path, preset 29 search steps. Replaces MSAA, which ax::backend does not
 // expose. Runs after tonemap + sRGB encode on an RGBA8 target; the final pass writes the luma into alpha.
 layout(binding = 0) uniform sampler2D uSrc;
-layout(std140, binding = 1) uniform fs_ub { vec4 uFx; };  // xy: 1/size, z: subpix, w: edge threshold
+layout(std140) uniform fs_ub { vec4 uFx; };  // xy: 1/size, z: subpix, w: edge threshold
 layout(location = 0) in vec2 vUv;
 layout(location = 0) out vec4 oCol;
 float L(vec2 p) { return textureLod(uSrc, p, 0.0).a; }

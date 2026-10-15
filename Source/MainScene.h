@@ -14,4 +14,6 @@ class MainScene : public ax::Scene {
   float _acc = 0; int _frames = 0; float _fps = 0; double _sumUpd = 0, _sumRen = 0, _sumGpu = 0;
   int _shotFrame = -1; std::string _shotPath; int _frameCount = 0; float _fixedDt = 0; bool _showStats = true;
   bool _quitAfterShot = false; Hud* _hud = nullptr; std::string _perf; bool _down = false, _dragged = false, _hudDrag = false; ax::Vec2 _downP, _lastP; float _startToast = 0; Intro* _intro = nullptr; float _hudFade = 0; ax::DrawNode* _bars = nullptr; float _barT = 0; float _holdAt = 0; bool _held = false; bool _adaptive = true, _padDown = false, _mouseSeen = false;
+  // native touch (Android/iOS deliver no mouse events): primary pointer = HUD widget drag or camera orbit/tap; 2nd finger = pinch zoom
+  int _tPrimary = -1, _tSecond = -1; bool _tHud = false; ax::Vec2 _tSecondP; float _pinchD = 0;
 };
