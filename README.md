@@ -90,17 +90,17 @@ python3 tools/wasm_serve.py --root build_wasm/bin/PelicanBike --port 8089
 - Emscripten WASM 目标（Axmol 的 wasm 平台层）
 
 ## 从零重写的部分
-- **自研 GL 渲染层** `Source/gfx`：Shader、Mesh（VAO/VBO/IBO，24 字节压缩顶点，材质写在顶点里）、实例缓冲、纹理、RenderTarget（含 MSAA）、统计
+- **ax::backend 渲染层** `Source/gfx`（无任何原生 GL 调用，GL/GLES3/WebGL2/Metal 通用，见 docs/BACKEND.md）：Shader、Mesh（24 字节压缩顶点，材质写在顶点里）、实例缓冲、纹理、RenderTarget、统计
 - **std140 "Frame" UBO**：相机、日月、调色板、雾、波相位、环境光立方体，所有程序共用
 - **着色器**（`Source/game/Shaders.h`）：Gerstner 海洋、天空、地形、道路（凹凸贴图）、PBR 光照（GGX + Lambert、路灯/车灯点光与聚光、鸟喙清漆层）
 - **阴影**：2048² 深度图，纹素对齐，PCF 5 采样
-- **HDR + MSAA 4×**（RGBA16F）、**UnrealBloomPass 移植**（5 级 mip 可分离高斯）、色彩分级（暗角/暖色/颗粒）、**ACES Filmic + sRGB**，以及 NaN/Inf 清理
+- **HDR（RGBA32F）+ FXAA 3.11**、**UnrealBloomPass 移植**（5 级 mip 可分离高斯）、色彩分级（暗角/暖色/颗粒）、**ACES Filmic + sRGB**，以及 NaN/Inf 清理
 - **环境光照**：CPU 积分的解析天空"环境光立方体" + 天空反射（时间变化超过 0.18h 时刷新，与 JS 的 PMREM 刷新一致），按法线方向的环境光色调
 - **骑手**：48 块刚性骨骼的 uniform 骨骼调色板，数据由原版 `pelican.js` / `bicycle.js` 烘焙（16 个曲柄姿态 × 2 个特技姿态在 CPU 混合），运行时再叠加转向、车轮、头部注视、嘴部、眨眼，脖子是 CPU 生成的管状网格
 - **粒子与特效**：点精灵粒子（尘土/闪光/水花）、彩带、实例化鱼、Verlet 布料围巾、实例化鸟群、灯塔/帆船/萤火虫
 - **音频**：`audio.js` 的软件合成器移植（振荡器/噪声、包络、RBJ 双二阶滤波、风/轮胎/海浪底噪、Schroeder 混响、压缩器、生成式音乐）
 - **UI**：HUD、开场卡片、参数面板、帮助、Toast、背景模糊玻璃面板、触屏按钮、窄屏布局
-- **画质**：4 档预设（渲染缩放/阴影尺寸/MSAA/泛光/道具密度）+ 移植自 `main.js` adaptQuality 的自适应分辨率
+- **画质**：4 档预设（渲染缩放/阴影尺寸/抗锯齿/泛光/道具密度）+ 移植自 `main.js` adaptQuality 的自适应分辨率
 
 ## 性能
 - 真实 GPU（Windows Chrome WASM）：**稳定 60 FPS**，渲染缩放 1.00，update 0.3 ms，**65 次绘制**，约 557k 三角形

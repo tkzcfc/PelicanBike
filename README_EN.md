@@ -90,17 +90,17 @@ python3 tools/wasm_serve.py --root build_wasm/bin/PelicanBike --port 8089
 - The Emscripten WASM target (Axmol's wasm platform layer)
 
 ## Written from scratch
-- **Custom GL render layer** `Source/gfx`: Shader, Mesh (VAO/VBO/IBO, packed 24-byte vertex with per-vertex material), instance buffers, textures, RenderTarget (with MSAA), stats
+- **ax::backend render layer** `Source/gfx` (no raw GL; runs on GL/GLES3/WebGL2/Metal, see docs/BACKEND.md): Shader, Mesh (packed 24-byte vertex with per-vertex material), instance buffers, textures, RenderTarget, stats
 - **std140 "Frame" UBO** shared by every program: camera, sun/moon, palette, fog, wave phases, ambient cube
 - **Shaders** (`Source/game/Shaders.h`): Gerstner ocean, sky, terrain, road (bump mapped), PBR lighting (GGX + Lambert, lamp/head point and spot lights, clearcoat beak)
 - **Shadows**: 2048² depth map, texel-snapped, 5-tap PCF
-- **HDR + 4× MSAA** (RGBA16F), **UnrealBloomPass port** (5-mip separable gaussian), colour grade (vignette/warm/grain), **ACES Filmic + sRGB**, NaN/Inf sanitizing
+- **HDR (RGBA32F) + FXAA 3.11**, **UnrealBloomPass port** (5-mip separable gaussian), colour grade (vignette/warm/grain), **ACES Filmic + sRGB**, NaN/Inf sanitizing
 - **Environment lighting**: a CPU-integrated analytic sky "ambient cube" plus sky reflection, refreshed when the hour moves more than 0.18h (matching JS PMREM refresh), with ambient tint that depends on normal direction
 - **Rider**: uniform bone palette of 48 rigid bones baked from the original `pelican.js` / `bicycle.js` (16 crank × 2 trick poses blended on the CPU), plus runtime steering, wheels, head look, jaw and blinks; the neck is a CPU-built tube
 - **Particles and effects**: point-sprite particles (dust/sparkle/splash), confetti, instanced fish, Verlet cloth scarf, instanced flocks, lighthouse/sailboats/fireflies
 - **Audio**: software-synth port of `audio.js` (oscillators/noise, envelopes, RBJ biquads, wind/tyre/surf beds, Schroeder reverb, compressor, generative music)
 - **UI**: HUD, intro card, settings panel, help, toasts, backdrop-blur glass panels, touch pads, narrow-screen layout
-- **Quality**: 4 presets (render scale, shadow size, MSAA, bloom, prop density) plus adaptive resolution ported from `main.js` adaptQuality
+- **Quality**: 4 presets (render scale, shadow size, anti-aliasing, bloom, prop density) plus adaptive resolution ported from `main.js` adaptQuality
 
 ## Performance
 - Real GPU (WASM in Chrome on Windows): **locked 60 FPS**, render scale 1.00, update 0.3 ms, **65 draw calls**, about 557k triangles

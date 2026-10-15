@@ -1,6 +1,6 @@
 # Rendering backend (ax::backend port)
 
-All 3D rendering goes through `ax::backend`. There are no raw GL calls outside `Source/gfx/GfxExt.cpp`.
+All 3D rendering goes through `ax::backend`, with no raw GL anywhere in `Source`.
 
 ## Layers
 - `Source/shaders/*.vert|*.frag`: ESSL 310 sources, plus shared code in `Source/shaders/include`.
@@ -19,21 +19,28 @@ All 3D rendering goes through `ax::backend`. There are no raw GL calls outside `
   - GL: a per-instance mat4 attribute `a_instance`.
   - Metal: storage buffer `u_instance[gl_InstanceIndex]`. axmol's convention handles this.
 
-## Emulations, which apply on every backend
-- Signed-byte normals: the bytes are uploaded with XOR 0x80 as UBYTE4N and decoded by `pbNormal()`.
-- Shadow map: the depth is packed into an RGB8 colour target (24 bit). The shader adds a slope-scaled bias, replacing polygon offset. The lit shader emulates `sampler2DShadow` with linear filtering: a 2x2 `texelFetch` LEQUAL compare with bilinear weights, at 5 taps.
-- The shader decodes sRGB when the backend cannot provide sRGB textures (`uOpt.z`).
+## No raw GL
+There are no `gl*` calls, GL headers or GL-only `#if` paths in `Source`. The old `GfxExt` extension layer is gone.
+Each missing backend feature is replaced as follows:
 
-## Per-backend extensions (`Source/gfx/GfxExt.cpp`)
-These are isolated, and each is a no-op that returns false on non-GL backends:
+| Feature (old GL extension) | Replacement on every backend |
+|---|---|
+| RGBA16F HDR targets | `PixelFormat::RGBA32F`, the only float colour format in ax::backend (see below) |
+| SRGB8_ALPHA8 textures | Shader decode (`uOpt.z` bit 0). The mip chain of sRGB textures is built on the CPU in linear space and re-encoded, so minified textures match hardware sRGB mipmaps |
+| Anisotropic filtering x8 | Shader emulation (`uOpt.z` bit 1): up to 8 `textureGrad` taps along the major axis of the UV footprint. Only applies to mipmapped textures. `PB2_NOANISO=1` disables it |
+| 4x MSAA on the HDR target | FXAA 3.11 (quality path, preset-29 search steps) on the tonemapped sRGB image. The final pass writes into an RGBA8 target, with luma in alpha, and `fxaa.frag` resolves into the window. Set `settings.aa = 0` or `PB2_AA=0` to render straight to the window |
+| Float readback (`PB2_DUMPHDR`, `PB2_SWEEP`) | Removed. These were debug tools only |
 
-| feature | GL / GLES3 / WebGL2 | Metal |
-|---|---|---|
-| RGBA16F HDR targets | the texture is re-specified as RGBA16F | RGBA32F through the backend's own format, so no extension is needed |
-| sRGB albedo textures | re-uploaded as SRGB8_ALPHA8 | decoded in the shader |
-| anisotropic filtering | GL_EXT_texture_filter_anisotropic | none |
-| MSAA scene target | multisample renderbuffers in an axmol RenderTarget; `glBlitFramebuffer` resolve at endPass | none, because axmol 2.x Metal MSAA is disabled |
-| float readback (debug only) | glReadPixels | not supported |
+### RGBA32F requirements, probed via `DriverBase` (`gfx::caps()`)
+- **Rendering:** WebGL2/GLES3 need `EXT_color_buffer_float`, and `EXT_float_blend` for the additive and alpha passes. Emscripten enables both automatically when present; they are near-universal on desktop browsers. They are not optional: RGBM or shared-exponent RGBA8 encodings cannot be blended, so they are no replacement.
+- **Linear filtering:** WebGL2/GLES3 need `OES_texture_float_linear`. On Metal, iOS/tvOS GPUs before Apple7 cannot filter RGBA32Float.
+  - When the probe says filtering is missing, HDR targets are created with NEAREST sampling. This avoids the GLES incomplete-texture rule.
+  - The bright, blur and final passes then do the bilinear filtering in the shader (`include/pb_post.glsl`, 4 `texelFetch`).
+  - Desktop GL 3.3 and macOS Metal use hardware filtering. `PB2_MANUAL_BILINEAR=1/0` forces either path.
+
+### Shadow map and normals (unchanged)
+- The shadow depth is packed into an RGB8 target, with slope-scaled bias in the shader. The lit shader emulates a 2x2 LEQUAL compare with bilinear weights over 5 taps.
+- Signed-byte normals are uploaded with XOR 0x80 and decoded by `pbNormal()`.
 
 ## Backends
 - Linux uses GL 3.3 and WASM uses WebGL2/GLES3. Both are verified.
