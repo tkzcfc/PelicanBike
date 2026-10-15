@@ -1,0 +1,9 @@
+build/
+build_wasm/
+build_*/
+shots/
+ref/
+*.log
+tools/node_modules/
+.vscode/
+.idea/
