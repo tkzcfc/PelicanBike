@@ -3,7 +3,7 @@
 // backend::CommandBuffer (beginRenderPass / updatePipelineState / setProgramState / draw* / endRenderPass),
 // so the same code drives OpenGL 3.3 core, GLES 3 / WebGL2 and Metal. Shaders are GLSL 310 es sources in
 // Source/shaders, cross-compiled per backend by axslcc at build time (axslc/custom/<name>_vs|_fs).
-// Features the backend has no API for live in gfx/GfxExt.* (clearly isolated, per backend).
+// No raw GL anywhere: features the backend lacks are emulated in shaders (see docs/BACKEND.md).
 #pragma once
 #include "renderer/backend/Backend.h"
 #include "renderer/backend/ProgramState.h"
@@ -80,19 +80,19 @@ struct InstanceBuf {
 struct Texture {
     bk::TextureBackend* t = nullptr;
     int w = 0, h = 0;
+    bool aniso = false;       // mipmapped: the lit shader emulates 8x anisotropic filtering
     bool shaderSrgb = false;  // sampled values still need sRGB->linear in the shader (no HW sRGB on this backend)
     bool loadPNG(const std::string& path, bool srgb, bool mips, bool repeat);
     void release();
 };
 
-enum class ColorFmt { None, RGBA8, HDR };  // HDR = RGBA16F (GL ext) or RGBA32F (backend core format)
+enum class ColorFmt { None, RGBA8, HDR };  // HDR = RGBA32F (the only float colour format ax::backend offers)
 
 struct RenderTarget {
     bk::RenderTarget* rt = nullptr;
     Texture color, depth;  // depth: D24S8, attachment only (never sampled)
-    int w = 0, h = 0, samples = 0;
-    void* msaa = nullptr;   // GfxExt multisample companion (GL only)
-    void create(int w, int h, ColorFmt fmt, bool withDepth, int samples = 0, bool nearest = false);
+    int w = 0, h = 0;
+    void create(int w, int h, ColorFmt fmt, bool withDepth, bool nearest = false);
     void destroy();
 };
 
@@ -103,6 +103,14 @@ struct State {
     bk::CompareFunction depthFunc = bk::CompareFunction::LESS;
     Blend blend = Blend::Off;
 };
+// What the backend offers for RGBA32F, probed via ax::backend's driver queries (no GL calls).
+struct Caps {
+    bool hdrLinear = false;      // RGBA32F linear filtering; false -> NEAREST targets + manual bilinear in post shaders
+    bool hdrRenderable = true;   // GLES/WebGL2: EXT_color_buffer_float
+    bool hdrBlend = true;        // GLES/WebGL2: EXT_float_blend (additive / alpha passes into the HDR target)
+    std::string api;             // driver version string, for the log
+};
+const Caps& caps();
 void initCommon();
 // rt == nullptr: Axmol's current render target (the window) with the Renderer's viewport
 void beginPass(RenderTarget* rt, bool clearColor, const float* rgba, bool clearDepth);

@@ -1,5 +1,4 @@
 #include "gfx/Gfx.h"
-#include "gfx/GfxExt.h"
 #include "renderer/Renderer.h"
 #include "renderer/PipelineDescriptor.h"
 #include "renderer/backend/ProgramManager.h"
@@ -8,7 +7,11 @@
 #include "platform/Image.h"
 #include "base/Logging.h"
 #include <cfloat>
+#include <cmath>
+#include <algorithm>
 #include <cstring>
+#include <cstdlib>
+#include <string>
 
 namespace gfx {
 Stats g_stats;
@@ -130,28 +133,52 @@ bool Texture::loadPNG(const std::string& path, bool srgb, bool mips, bool repeat
     td.samplerDescriptor = bk::SamplerDescriptor(bk::SamplerFilter::LINEAR, bk::SamplerFilter::LINEAR, wrap, wrap);
     t = driver()->newTexture(td);
     static_cast<bk::Texture2DBackend*>(t)->updateData(const_cast<uint8_t*>(src), w, h, 0);
-    shaderSrgb = srgb && !ext::textureToSrgb(t, src, w, h);  // HW sRGB decode where the backend allows it
-    if (mips) {
+    shaderSrgb = srgb;  // no sRGB texture format in ax::backend: decoded in the shader
+    aniso = mips;
+    if (mips && srgb) {
+        // sRGB data has no backend format, so build the mip chain on the CPU in linear space (what an SRGB8_ALPHA8
+        // texture's glGenerateMipmap would do); averaging the encoded bytes darkens/shifts minified textures.
+        static float dec[256]; static bool lut = false;
+        if (!lut) { lut = true; for (int i = 0; i < 256; i++) { float c = i / 255.f; dec[i] = c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); } }
+        auto enc = [](float l) { l = std::min(1.f, std::max(0.f, l)); float c = l <= 0.0031308f ? l * 12.92f : 1.055f * std::pow(l, 1.f / 2.4f) - 0.055f; return uint8_t(c * 255.f + 0.5f); };
+        std::vector<float> cur(size_t(w) * h * 4);
+        for (size_t i = 0, n = size_t(w) * h; i < n; i++) { for (int k = 0; k < 3; k++) cur[i * 4 + k] = dec[src[i * 4 + k]]; cur[i * 4 + 3] = src[i * 4 + 3] / 255.f; }
+        int cw = w, ch = h; std::vector<float> nxt; std::vector<uint8_t> out;
+        for (int level = 1; cw > 1 || ch > 1; level++) {
+            int nw = std::max(1, cw / 2), nh = std::max(1, ch / 2);
+            nxt.assign(size_t(nw) * nh * 4, 0.f); out.resize(size_t(nw) * nh * 4);
+            for (int y = 0; y < nh; y++) for (int x = 0; x < nw; x++) {
+                int x0 = std::min(cw - 1, x * 2), x1 = std::min(cw - 1, x * 2 + 1), y0 = std::min(ch - 1, y * 2), y1 = std::min(ch - 1, y * 2 + 1);
+                for (int k = 0; k < 4; k++) {
+                    float v = 0.25f * (cur[(size_t(y0) * cw + x0) * 4 + k] + cur[(size_t(y0) * cw + x1) * 4 + k] + cur[(size_t(y1) * cw + x0) * 4 + k] + cur[(size_t(y1) * cw + x1) * 4 + k]);
+                    nxt[(size_t(y) * nw + x) * 4 + k] = v;
+                    out[(size_t(y) * nw + x) * 4 + k] = k < 3 ? enc(v) : uint8_t(std::min(1.f, v) * 255.f + 0.5f);
+                }
+            }
+            static_cast<bk::Texture2DBackend*>(t)->updateData(out.data(), nw, nh, level);
+            cur.swap(nxt); cw = nw; ch = nh;
+        }
+        t->updateSamplerDescriptor(bk::SamplerDescriptor(bk::SamplerFilter::LINEAR, bk::SamplerFilter::LINEAR_MIPMAP_LINEAR, wrap, wrap));
+    } else if (mips) {
         t->generateMipmaps();
         t->updateSamplerDescriptor(bk::SamplerDescriptor(bk::SamplerFilter::LINEAR, bk::SamplerFilter::LINEAR_MIPMAP_LINEAR, wrap, wrap));
-        ext::textureAnisotropy(t, 8.f);  // textures.js toTexture(): anisotropy 8
     }
     return true;
 }
 void Texture::release() { AX_SAFE_RELEASE_NULL(t); }
 
 // ---------------- RenderTarget ----------------
-void RenderTarget::create(int W, int H, ColorFmt fmt, bool withDepth, int smp, bool nearest) {
+void RenderTarget::create(int W, int H, ColorFmt fmt, bool withDepth, bool nearest) {
     destroy();
-    w = W; h = H; samples = 0;
+    w = W; h = H;
     bk::TextureDescriptor td;
     td.textureUsage = bk::TextureUsage::RENDER_TARGET; td.width = w; td.height = h;
+    if (fmt == ColorFmt::HDR && !caps().hdrLinear) nearest = true;  // incomplete-texture rule: no LINEAR on unfilterable float
     auto f = nearest ? bk::SamplerFilter::NEAREST : bk::SamplerFilter::LINEAR;
     td.samplerDescriptor = bk::SamplerDescriptor(f, f, bk::SamplerAddressMode::CLAMP_TO_EDGE, bk::SamplerAddressMode::CLAMP_TO_EDGE);
     if (fmt != ColorFmt::None) {
         td.textureFormat = fmt == ColorFmt::HDR ? bk::PixelFormat::RGBA32F : bk::PixelFormat::RGBA8;
         color.t = driver()->newTexture(td); color.w = w; color.h = h;
-        if (fmt == ColorFmt::HDR) ext::textureToHalfFloat(color.t, w, h);  // RGBA16F where possible (half the bandwidth, = main)
     }
     if (withDepth) {
         td.textureFormat = bk::PixelFormat::D24S8;
@@ -159,13 +186,10 @@ void RenderTarget::create(int W, int H, ColorFmt fmt, bool withDepth, int smp, b
         depth.t = driver()->newTexture(td); depth.w = w; depth.h = h;
     }
     rt = driver()->newRenderTarget(color.t, depth.t, nullptr);
-    if (smp > 0 && fmt != ColorFmt::None) { msaa = ext::msaaCreate(*this, smp); if (msaa) samples = smp; }
 }
 void RenderTarget::destroy() {
-    if (msaa) { ext::msaaDestroy(msaa); msaa = nullptr; }
     AX_SAFE_RELEASE_NULL(rt);
     color.release(); depth.release();
-    samples = 0;
 }
 
 // ---------------- passes / draws ----------------
@@ -176,7 +200,30 @@ static RenderTarget* s_pass = nullptr;
 static bk::RenderTarget* s_passRT = nullptr;
 static int s_passW = 0, s_passH = 0;
 
+static Caps s_caps; static bool s_capsInit = false;
+const Caps& caps() {
+    if (s_capsInit) return s_caps;
+    s_capsInit = true;
+    auto* d = driver();
+    std::string v = d->getVersion() ? d->getVersion() : "";
+    s_caps.api = v + " / " + (d->getRenderer() ? d->getRenderer() : "");
+    auto ext = [&](const char* n) { return d->hasExtension(std::string("GL_") + n) || d->hasExtension(n); };
+    if (v.find("OpenGL ES") != std::string::npos || v.find("WebGL") != std::string::npos) {  // GLES 3 / WebGL2
+        s_caps.hdrLinear = ext("OES_texture_float_linear");
+        s_caps.hdrRenderable = ext("EXT_color_buffer_float");
+        s_caps.hdrBlend = ext("EXT_float_blend");
+    } else if (v.rfind("iOS", 0) == 0 || v.rfind("tvOS", 0) == 0) {  // Metal, Apple GPUs: no RGBA32Float filtering before Apple7/A14
+        s_caps.hdrLinear = false;
+    } else {  // desktop GL 3.3 core (float filtering is core since GL 3.0) or Metal on macOS
+        s_caps.hdrLinear = true;
+    }
+    if (const char* f = std::getenv("PB2_MANUAL_BILINEAR")) s_caps.hdrLinear = std::atoi(f) == 0;
+    AXLOGI("[gfx] backend {} | RGBA32F linear {} renderable {} blend {}", s_caps.api, s_caps.hdrLinear, s_caps.hdrRenderable, s_caps.hdrBlend);
+    if (!s_caps.hdrRenderable || !s_caps.hdrBlend) AXLOGW("[gfx] float render target / float blending not reported by the driver: HDR passes may fail");
+    return s_caps;
+}
 void initCommon() {
+    caps();
     const float tri[6] = {-1, -1, 3, -1, -1, 3};
     s_fsTri.createRaw(tri, sizeof(tri), 3, false);
 }
@@ -192,7 +239,7 @@ void beginPass(RenderTarget* t, bool clearColor, const float* rgba, bool clearDe
     s_pass = t;
     int vx = 0, vy = 0;
     if (t) {
-        s_passRT = t->msaa ? ext::msaaTarget(t->msaa) : t->rt;
+        s_passRT = t->rt;
         s_passW = t->w; s_passH = t->h;
     } else {
         auto* r = renderer();
@@ -210,7 +257,6 @@ void beginPass(RenderTarget* t, bool clearColor, const float* rgba, bool clearDe
 }
 void endPass() {
     cmd()->endRenderPass();
-    if (s_pass && s_pass->msaa) ext::msaaResolve(s_pass->msaa, *s_pass);
     s_pass = nullptr; s_passRT = nullptr;
 }
 void setState(const State& s) {
