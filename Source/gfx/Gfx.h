@@ -1,19 +1,20 @@
-// PelicanBike lightweight GL renderer layer ("gfx").
-// Runs inside one Axmol CallbackCommand per frame; owns all 3D GL state and restores
-// Axmol's GL state cache afterwards (OpenGLState::reset), so Axmol keeps doing 2D/HUD.
+// PelicanBike render layer ("gfx") on top of Axmol's renderer backend (ax::backend).
+// Everything 3D is recorded inside one Axmol CallbackCommand per frame, directly on the Renderer's
+// backend::CommandBuffer (beginRenderPass / updatePipelineState / setProgramState / draw* / endRenderPass),
+// so the same code drives OpenGL 3.3 core, GLES 3 / WebGL2 and Metal. Shaders are GLSL 310 es sources in
+// Source/shaders, cross-compiled per backend by axslcc at build time (axslc/custom/<name>_vs|_fs).
+// Features the backend has no API for live in gfx/GfxExt.* (clearly isolated, per backend).
 #pragma once
-#include "platform/GL.h"
-// desktop GL 3.3 core (Linux/Windows/macOS) vs GLES 3.0 (Android, WebGL2): gates desktop-only calls (timer queries, PROGRAM_POINT_SIZE)
-#if AX_TARGET_PLATFORM == AX_PLATFORM_WASM || (defined(AX_GLES_PROFILE) && AX_GLES_PROFILE)
-#  define PB_DESKTOP_GL 0
-#else
-#  define PB_DESKTOP_GL 1
-#endif
+#include "renderer/backend/Backend.h"
+#include "renderer/backend/ProgramState.h"
+#include "renderer/backend/Program.h"
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 namespace gfx {
+namespace bk = ax::backend;
 
 struct Stats {
     int draws = 0, tris = 0, passes = 0, stateChanges = 0;
@@ -21,19 +22,12 @@ struct Stats {
 };
 extern Stats g_stats;
 
-// GLSL source prefix: "#version 330 core" (desktop) or "#version 300 es" (WebGL2)
-const char* glslHeader();
+// Vertex streams a program can be fed with
+enum class VL { Packed, Post, Particle };
 
-struct Shader {
-    GLuint prog = 0;
-    bool build(const char* name, const std::string& vs, const std::string& fs);
-    GLint loc(const char* n) const { return glGetUniformLocation(prog, n); }
-    void use() const;
-};
-
-enum Attr : GLuint { A_POS = 0, A_NRM = 1, A_COL = 2, A_MAT = 3, A_POS2 = 4, A_NRM2 = 5, A_I0 = 6, A_I1 = 7, A_I2 = 8 };
-
-// Packed vertex: pos f32x3 | normal s8x3+flags u8 | color sRGB u8x4 | mat u8x4  = 24 bytes
+// Packed vertex: pos f32x3 | normal s8x3+flags u8 | color sRGB u8x4 | mat u8x4  = 24 bytes (CPU / .pbm layout).
+// On upload the normal bytes are re-biased to unsigned (+128) because the backend has no signed-byte vertex
+// format; the shaders decode it back to the exact GL snorm value (pbNormal in pb_frame.glsl).
 struct PVertex {
     float p[3];
     int8_t n[3];
@@ -43,48 +37,82 @@ struct PVertex {
 };
 static_assert(sizeof(PVertex) == 24, "PVertex");
 
+// A cross-compiled program + its (single, reused) ProgramState. Uniforms are written into the ProgramState
+// right before each draw; both backends snapshot them at draw time (GL: UBO upload, Metal: set*Bytes).
+struct Shader {
+    bk::Program* prog = nullptr;
+    bk::ProgramState* ps = nullptr;
+    std::string name;
+    bool build(const char* vs, const char* fs, VL layout = VL::Packed);  // vs/fs: Source/shaders basenames
+    const bk::UniformLocation& loc(const char* n) const;
+    void set(const char* n, const void* d, size_t bytes) const;
+    void set4(const char* n, float x, float y = 0, float z = 0, float w = 0) const { float v[4] = {x, y, z, w}; set(n, v, 16); }
+    void setMat(const char* n, const float* m16) const { set(n, m16, 64); }
+    void setFrame(const void* f, size_t bytes) const;  // vF (vertex) + fF (fragment) copies of FrameUBO
+    void tex(const char* n, int slot, bk::TextureBackend* t) const;
+    bool hasFrame() const { return bool(lFrameV) || bool(lFrameF); }
+ private:
+    mutable std::unordered_map<std::string, bk::UniformLocation> _locs;
+    bk::UniformLocation lFrameV, lFrameF;
+};
+
 struct Mesh {
-    GLuint vao = 0, vbo = 0, ibo = 0;
-    GLsizei count = 0;
-    GLenum indexType = GL_UNSIGNED_INT;
-    GLenum prim = GL_TRIANGLES;
+    bk::Buffer* vb = nullptr;
+    bk::Buffer* ib = nullptr;
+    uint32_t count = 0;
+    bk::PrimitiveType prim = bk::PrimitiveType::TRIANGLE;
     float bmin[3] = {0, 0, 0}, bmax[3] = {0, 0, 0};
     void createPacked(const PVertex* v, size_t nv, const uint32_t* idx, size_t ni, bool dynamic = false);
     void updatePacked(const PVertex* v, size_t nv);
-    void draw(GLsizei instances = 0) const;
-    void drawRange(GLsizei first, GLsizei cnt) const;
+    void createRaw(const void* data, size_t bytes, uint32_t vertices, bool dynamic);  // custom stream (VL::Particle/Post)
+    void updateRaw(const void* data, size_t bytes);
 };
 
-// Per-instance stream (48 B): aI0 = pos.xyz, scale | aI1 = rotY, yScale, -, - | aI2 = tint.rgb, sway phase
+// Per-instance stream, 64 B: the backend's instancing input is one mat4 (`a_instance` on GL, a storage buffer
+// `u_instance[]` on Metal). Columns: aI0, aI1, aI2 (12 floats from the game), 4th column unused.
 struct InstanceBuf {
-    GLuint vbo = 0;
+    bk::Buffer* buf = nullptr;
     int capacity = 0, count = 0;
     void create(int cap);
     void upload(const float* data, int n);  // n instances * 12 floats
-    void attach(GLuint vao) const;          // bind to A_I0/A_I1 with divisor 1
 };
 
 struct Texture {
-    GLuint id = 0;
+    bk::TextureBackend* t = nullptr;
     int w = 0, h = 0;
+    bool shaderSrgb = false;  // sampled values still need sRGB->linear in the shader (no HW sRGB on this backend)
     bool loadPNG(const std::string& path, bool srgb, bool mips, bool repeat);
-    void create(int w, int h, GLenum ifmt, GLenum fmt, GLenum type, bool linear, bool clamp = true);
+    void release();
 };
+
+enum class ColorFmt { None, RGBA8, HDR };  // HDR = RGBA16F (GL ext) or RGBA32F (backend core format)
 
 struct RenderTarget {
-    GLuint fbo = 0;
-    Texture color;   // optional
-    Texture depth;   // optional (depth texture)
-    GLuint msaaFbo = 0, msaaColor = 0, msaaDepth = 0;
+    bk::RenderTarget* rt = nullptr;
+    Texture color, depth;  // depth: D24S8, attachment only (never sampled)
     int w = 0, h = 0, samples = 0;
-    void create(int w, int h, GLenum colorFmt, bool withDepthTex, int samples = 0, bool depthRB = false);
+    void* msaa = nullptr;   // GfxExt multisample companion (GL only)
+    void create(int w, int h, ColorFmt fmt, bool withDepth, int samples = 0, bool nearest = false);
     void destroy();
-    void bindDraw() const;   // binds MSAA fbo if present
-    void resolve() const;    // MSAA -> color texture
 };
 
-// cheap fullscreen triangle
-void drawFullscreen();
+// ---- render passes / draws on the Renderer's command buffer ----
+enum class Blend { Off, Alpha, Add, PremulAdd };
+struct State {
+    bool depthTest = true, depthWrite = true;
+    bk::CompareFunction depthFunc = bk::CompareFunction::LESS;
+    Blend blend = Blend::Off;
+};
 void initCommon();
+// rt == nullptr: Axmol's current render target (the window) with the Renderer's viewport
+void beginPass(RenderTarget* rt, bool clearColor, const float* rgba, bool clearDepth);
+void endPass();
+void setState(const State& s);
+const State& state();
+void draw(const Shader& s, const Mesh& m, const InstanceBuf* inst = nullptr);
+void drawArrays(const Shader& s, const Mesh& m, bk::PrimitiveType prim, uint32_t first, uint32_t count);
+void drawFullscreen(const Shader& s);
+int passW();
+int passH();  // size of the current pass (framebuffer px)
 
 }  // namespace gfx
