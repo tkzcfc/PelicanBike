@@ -1,6 +1,5 @@
 #include "Platform.h"
 #include "axmol.h"
-#include "platform/RenderViewImpl.h"
 #if AX_TARGET_PLATFORM == AX_PLATFORM_WASM
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -9,6 +8,7 @@
 #include <ctime>
 #if AX_TARGET_PLATFORM == AX_PLATFORM_WIN32 || AX_TARGET_PLATFORM == AX_PLATFORM_LINUX || AX_TARGET_PLATFORM == AX_PLATFORM_MAC
 #  define PB_GLFW 1  // desktop: RenderViewImpl is GLFW-backed
+#  include "platform/RenderViewImpl.h"
 #else
 #  define PB_GLFW 0
 #endif
