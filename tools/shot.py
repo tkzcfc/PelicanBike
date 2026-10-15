@@ -6,7 +6,7 @@ out = sys.argv[1]
 env = dict(os.environ, DISPLAY=os.environ.get('SHOT_DISPLAY', ':12'), PB2_SHOT='1', PB2_SHOT_FRAME=os.environ.get('PB2_SHOT_FRAME', '60'))
 for kv in sys.argv[2:]:
     k, v = kv.split('=', 1); env[k] = v
-d = '/workspace/PelicanBike_rename/PelicanBike/build/bin/PelicanBike'
+d = os.environ.get('PB_BIN', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'build', 'bin', 'PelicanBike'))
 p = subprocess.Popen(['./PelicanBike'], cwd=d, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 log = []
 for line in p.stdout:
