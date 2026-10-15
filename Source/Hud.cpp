@@ -6,7 +6,7 @@ static const char* FONT = "fonts/NotoSansSC-Regular.ttf";
 static const char* FONT_NUM = "fonts/NotoSans-ExtraBold.ttf";  // weight-800 Latin for .gauge .val b / #fishCount (font-weight 800/900)
 static void numFont(Label* l, float size) { TTFConfig c(FONT_NUM, size); l->disableEffect(LabelEffect::BOLD); l->setTTFConfig(c); }
 static const Color4F GLASS(14 / 255.f, 20 / 255.f, 34 / 255.f, 0.52f), GLASS_S(10 / 255.f, 14 / 255.f, 26 / 255.f, 0.72f);
-static const Color4B MUTED(236, 240, 250, 168), ACCENT(255, 181, 71, 255), TEXT(244, 246, 251, 255);
+static const Color4B MUTED(236, 240, 250, 168), ACCENT(255, 181, 71, 255), COL_TEXT(244, 246, 251, 255);
 static const char* CAMS[5] = {"自由环绕", "追随", "侧面跟拍", "电影运镜", "鹈鹕视角"};
 static const float EMO_PX = 26;  // .toast .emo font-size
 static const char* ACH_E[14] = {"fish", "star", "rod", "trophy", "roo", "wing", "circus", "dash", "zap", "road", "map", "moon", "bell", "horn"};
@@ -34,7 +34,7 @@ bool Hud::init() {
   float W = _sz.width, H = _sz.height;
   // dash; ≤900px: .gauge 96px, val 28px, .stats 11.5px/13px gap 3px 10px (index.html @media)
   _narrow = W <= 900; const float G = _narrow ? 96 : 124, gc = 16 + 12 + G / 2, sw = _narrow ? 78 : 112, dy = _narrow ? 19.5f : 24, vf = _narrow ? 13 : 15;
-  _speedVal = label(this, "0", _narrow ? 28 : 36, {gc, gc + 4 * G / 124}, {0.5f, 0.5f}, TEXT, true); numFont(_speedVal, _narrow ? 28 : 36);
+  _speedVal = label(this, "0", _narrow ? 28 : 36, {gc, gc + 4 * G / 124}, {0.5f, 0.5f}, COL_TEXT, true); numFont(_speedVal, _narrow ? 28 : 36);
   _dimStatic.push_back(label(this, "KM/H", _narrow ? 10 : 11, {gc, gc - 18 * G / 124}, {0.5f, 0.5f}, MUTED));
   float sx = 16 + 12 + G + 14, sy = gc + 1.5f * dy;
   const char* names[4] = {"踏频", "档位", "里程", "镜头"};
@@ -42,15 +42,15 @@ bool Hud::init() {
   // <b>0 <small muted 400>rpm</small></b>: unit at .833em, value right-aligned before it
   { auto u1 = label(this, "rpm", vf * 0.833f, {sx + sw, sy - 1}, {1, 0.5f}, MUTED); auto u2 = label(this, "km", vf * 0.833f, {sx + sw, sy - 2 * dy - 1}, {1, 0.5f}, MUTED);
     _dimStatic.push_back(u1); _dimStatic.push_back(u2); _cadX = sx + sw - u1->getContentSize().width - vf * 0.3f; _distX = sx + sw - u2->getContentSize().width - vf * 0.3f; }
-  _cad = label(this, "0", vf, {_cadX, sy}, {1, 0.5f}, TEXT, true);
-  _gear = label(this, "3/5", vf, {sx + sw, sy - dy}, {1, 0.5f}, TEXT, true);
-  _dist = label(this, "0.00", vf, {_distX, sy - 2 * dy}, {1, 0.5f}, TEXT, true);
-  _camL = label(this, "", _narrow ? 12 : 13, {sx + sw, sy - 3 * dy}, {1, 0.5f}, TEXT, true);
+  _cad = label(this, "0", vf, {_cadX, sy}, {1, 0.5f}, COL_TEXT, true);
+  _gear = label(this, "3/5", vf, {sx + sw, sy - dy}, {1, 0.5f}, COL_TEXT, true);
+  _dist = label(this, "0.00", vf, {_distX, sy - 2 * dy}, {1, 0.5f}, COL_TEXT, true);
+  _camL = label(this, "", _narrow ? 12 : 13, {sx + sw, sy - 3 * dy}, {1, 0.5f}, COL_TEXT, true);
   _fishL = label(this, "0", 34, {W - 16 - 16 - 186, 16 + 12 + 66}, {0, 0.5f}, ACCENT, true); numFont(_fishL, 34);
-  _achL = label(this, "0/14", 14, {W - 32, 16 + 12 + 60}, {1, 0.5f}, TEXT, true);
-  _clock = label(this, "17:18", 14, {W - 32 - 38, 16 + 12 + 16}, {1, 0.5f}, TEXT, true);
+  _achL = label(this, "0/14", 14, {W - 32, 16 + 12 + 60}, {1, 0.5f}, COL_TEXT, true);
+  _clock = label(this, "17:18", 14, {W - 32 - 38, 16 + 12 + 16}, {1, 0.5f}, COL_TEXT, true);
   _fps = label(this, "", 11, {W - 26, H - 76}, {1, 1}, MUTED); _fps->setVisible(false);
-  _pause = label(this, "已暂停 · 按 P 继续", 22, {W / 2, H / 2}, {0.5f, 0.5f}, TEXT, true); _pause->setVisible(false);
+  _pause = label(this, "已暂停 · 按 P 继续", 22, {W / 2, H / 2}, {0.5f, 0.5f}, COL_TEXT, true); _pause->setVisible(false);
   _pop = label(this, "", 22, {0, 0}, {0.5f, 0.5f}, ACCENT, true); _pop->setVisible(false); _pop->enableOutline(Color4B(0, 0, 0, 120), 2);
   for (int i = 0; i < 5; i++) _camBtns.push_back(label(this, CAMS[i], 13, {0, 0}, {0.5f, 0.5f}, MUTED));
   _touchD = pb::AADrawNode::create(); addChild(_touchD, 5);
@@ -92,7 +92,7 @@ void Hud::rebuildStatic() {
     Vec2 beak[3] = {o + Vec2(-9, 7), o + Vec2(-15, 4), o + Vec2(-9, 3)}; _bg->drawSolidPoly(beak, 3, org);
     _bg->drawSolidCircle(o + Vec2(-5, 7), 1.5f, 0, 8, Color4F(0.05f, 0.05f, 0.1f, 1));
     _bg->drawSegment(o + Vec2(-1, -10), o + Vec2(-1, -12), 1, org); _bg->drawSegment(o + Vec2(3, -10), o + Vec2(3, -12), 1, org); }
-  label(_static, "鹈鹕骑单车", 15, {68, narrow ? H - 39 : H - 31}, {0, 0.5f}, TEXT, true);
+  label(_static, "鹈鹕骑单车", 15, {68, narrow ? H - 39 : H - 31}, {0, 0.5f}, COL_TEXT, true);
   if (!narrow) label(_static, "Pelican on a Bike · 实时 3D", 11, {68, H - 50}, {0, 0.5f}, MUTED);  // .brand small hidden ≤900
   // cam chips (center top)
   std::vector<float> ws; float tot = 10; const float cfs = narrow ? 12 : 13; for (auto* c : CAMS) { float w = Label::createWithTTF(c, FONT, cfs)->getContentSize().width + (narrow ? 18 : 24); ws.push_back(w); tot += w + 4; } tot -= 4;
@@ -105,7 +105,7 @@ void Hud::rebuildStatic() {
   const int NT = 7; float tw = NT * 44 + 8; Rect tp(W - 16 - tw, H - 14 - 50, tw, 50); panel(_bg, tp, 16, GLASS);
   for (int i = 0; i < NT; i++) { Rect r(tp.getMinX() + 6 + i * 44, tp.getMinY() + 6, 38, 38);
     if ((i == 4 && _showSettings) || (i == 5 && _showHelp)) panel(_bg, r, 11, Color4F(63 / 255.f, 208 / 255.f, 201 / 255.f, 0.22f), false);
-    drawToolIcon(_bg, i, Vec2(r.getMidX(), r.getMidY())); if (i == 5) label(_static, "?", 16, {r.getMidX(), r.getMidY()}, {0.5f, 0.5f}, TEXT, true);
+    drawToolIcon(_bg, i, Vec2(r.getMidX(), r.getMidY())); if (i == 5) label(_static, "?", 16, {r.getMidX(), r.getMidY()}, {0.5f, 0.5f}, COL_TEXT, true);
     if (i == 1 && !_g->settings.music) _bg->drawSegment(Vec2(r.getMidX() - 9, r.getMidY() - 9), Vec2(r.getMidX() + 9, r.getMidY() + 9), 1, Color4F(1, 90 / 255.f, 110 / 255.f, 1));
     _btns.push_back({r, [this, i]() { switch (i) { case 0: wantsScreenshot = true; break; case 1: _g->settings.music = !_g->settings.music; _dirty = true; break; case 2: wantsShare = true; break;
       case 3: wantsFullscreen = true; break; case 4: toggleSettings(); break; case 5: toggleHelp(); break; default: wantsUrl = "https://github.com/tkzcfc/PelicanBike"; } }}); }
@@ -153,7 +153,7 @@ void Hud::buildSettings() {
   { std::vector<Row> vis; int fi = -1; for (auto& r : rows) { bool hdr = !r.v && !r.b && !r.e; if (hdr) fi++; if (hdr || (_openMask >> fi & 1)) { vis.push_back(r); if (hdr) vis.back().ne = fi; } } rows = vis; }
   float rw = 300, rh = 24, ph = rows.size() * rh + 44, x0 = W - 16 - rw, y0 = H - 76 - ph;
   _settings = Node::create(); addChild(_settings, 5); auto d = pb::AADrawNode::create(); _settings->addChild(d); panel(d, Rect(x0, y0, rw, ph), 12, GLASS_S);
-  label(_settings, "参数面板", 14, {x0 + 12, y0 + ph - 18}, {0, 0.5f}, TEXT, true);
+  label(_settings, "参数面板", 14, {x0 + 12, y0 + ph - 18}, {0, 0.5f}, COL_TEXT, true);
   for (size_t i = 0; i < rows.size(); i++) { auto& r = rows[i]; float y = y0 + ph - 44 - i * rh;
     if (!r.v && !r.b && !r.e) { int fi = r.ne; bool open = _openMask >> fi & 1; label(_settings, std::string(open ? "- " : "+ ") + (r.name + 4), 12, {x0 + 12, y}, {0, 0.5f}, ACCENT, true);
       _settingsBtns.push_back({Rect(x0, y - 11, rw, 22), [this, fi]() { _openMask ^= 1u << fi; _settingsRebuild = true; }}); continue; }
@@ -173,7 +173,7 @@ void Hud::buildSettings() {
 void Hud::buildHelp() {
   float W = _sz.width, H = _sz.height; _help = Node::create(); addChild(_help, 6); auto d = pb::AADrawNode::create(); _help->addChild(d);
   d->drawSolidRect(Vec2(0, 0), Vec2(W, H), Color4F(0, 0, 0, 0.35f)); Rect p(W / 2 - 280, H / 2 - 170, 560, 340); panel(d, p, 16, GLASS_S);
-  label(_help, "操作说明", 18, {p.getMinX() + 24, p.getMaxY() - 30}, {0, 0.5f}, TEXT, true);
+  label(_help, "操作说明", 18, {p.getMinX() + 24, p.getMaxY() - 30}, {0, 0.5f}, COL_TEXT, true);
   const char* items[] = {"W/↑ 加速", "S/↓ 刹车（滑行有棘轮声）", "A/D 左右变道抓鱼", "空格 跳跃", "T 放手展翅 + 抬前轮", "B 按车铃", "H 鹈鹕大叫", "C 切换镜头", "Q/E 手动换挡", "N 时间快进 3 小时",
                          "K 截图 · F 全屏", "U 隐藏界面", "P 暂停", "拖动鼠标环绕 · 滚轮缩放"};
   for (int i = 0; i < 14; i++) label(_help, items[i], 13, {p.getMinX() + 24 + (i % 2) * 270, p.getMaxY() - 64 - (i / 2) * 26}, {0, 0.5f}, MUTED);
@@ -189,7 +189,7 @@ void Hud::emoSprite(Node* parent, const std::string& name, float px, Vec2 pos) {
 void Hud::toast(const std::string& title, const std::string& sub, const std::string& emo) {
   auto n = Node::create(); addChild(n, 8); auto d = pb::AADrawNode::create(); n->addChild(d);
   float tx = 16; if (!emo.empty()) if (auto sp = Sprite::create("emoji/" + emo + ".png")) { sp->setScale(EMO_PX / sp->getContentSize().width); sp->setPosition(12 + EMO_PX / 2, 10); n->addChild(sp); tx = 12 + EMO_PX + 10; }
-  auto t = label(n, title, 14, {tx, 12}, {0, 0}, TEXT, true); auto s = label(n, sub, 12, {tx, -8}, {0, 0}, MUTED);
+  auto t = label(n, title, 14, {tx, 12}, {0, 0}, COL_TEXT, true); auto s = label(n, sub, 12, {tx, -8}, {0, 0}, MUTED);
   float w = std::max(t->getContentSize().width, s->getContentSize().width) + tx + 16;
   panel(d, Rect(0, -16, w, 52), 14, GLASS_S, false); d->drawPoly(std::vector<Vec2>{{0, -16}, {w, -16}, {w, 36}, {0, 36}}.data(), 4, true, Color4F(1, 210 / 255.f, 122 / 255.f, 0.35f));
   n->setContentSize(Size(w, 52)); n->setCascadeOpacityEnabled(true); for (auto c : n->getChildren()) c->setCascadeOpacityEnabled(true);
@@ -255,9 +255,9 @@ void Hud::tick(float dt, float fps, const std::string& perf) {
       if (r.v) { float lo = 0, hi = 1; for (auto& s : _sliders) if (s.v == r.v && s.tx0 == x0) { lo = s.lo; hi = s.hi; }
         float u = std::clamp((*r.v - lo) / (hi - lo), 0.f, 1.f), tw = w - 52;
         _settingsDyn->drawSolidRect(Vec2(x0, y - 7), Vec2(x0 + tw, y + 7), Color4F(1, 1, 1, 0.1f)); _settingsDyn->drawSolidRect(Vec2(x0, y - 7), Vec2(x0 + tw * u, y + 7), Color4F(63 / 255.f, 208 / 255.f, 201 / 255.f, 0.8f));
-        char vb[32]; snprintf(vb, 32, hi - lo > 5 ? "%.1f" : "%.2f", *r.v); label(_settingsVal, vb, 11, {x0 + w, y}, {1, 0.5f}, TEXT); }
+        char vb[32]; snprintf(vb, 32, hi - lo > 5 ? "%.1f" : "%.2f", *r.v); label(_settingsVal, vb, 11, {x0 + w, y}, {1, 0.5f}, COL_TEXT); }
       else if (r.b) { bool on = *r.b; _settingsDyn->drawSolidRect(Vec2(x0, y - 7), Vec2(x0 + 14, y + 7), on ? Color4F(63 / 255.f, 208 / 255.f, 201 / 255.f, 1) : Color4F(1, 1, 1, 0.15f)); if (on) { _settingsDyn->drawSegment(Vec2(x0 + 3, y), Vec2(x0 + 6, y - 3.5f), 1.2f, Color4F(0.04f, 0.05f, 0.1f, 1)); _settingsDyn->drawSegment(Vec2(x0 + 6, y - 3.5f), Vec2(x0 + 11.5f, y + 4), 1.2f, Color4F(0.04f, 0.05f, 0.1f, 1)); } }
-      else if (r.e) { static const char* G[3] = {"自动", "戴上", "摘下"}, *Q[4] = {"流畅", "均衡", "精美", "极致"}; label(_settingsVal, std::string("[ ") + (r.ne == 4 ? Q[*r.e] : G[*r.e]) + " ]", 12, {x0, y}, {0, 0.5f}, TEXT); }
+      else if (r.e) { static const char* G[3] = {"自动", "戴上", "摘下"}, *Q[4] = {"流畅", "均衡", "精美", "极致"}; label(_settingsVal, std::string("[ ") + (r.ne == 4 ? Q[*r.e] : G[*r.e]) + " ]", 12, {x0, y}, {0, 0.5f}, COL_TEXT); }
     } }
   { bool cine = _g->camMode == 3; uint8_t op = cine ? 89 : 255; _bgDim->setOpacity(op); _dynDim->setOpacity(op); _staticDim->setOpacity(op);
     for (auto* l : {_speedVal, _cad, _gear, _dist, _camL, _fishL, _achL, _clock}) l->setOpacity(op); if (_hints) _hints->setOpacity(op);

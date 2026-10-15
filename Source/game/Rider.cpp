@@ -83,10 +83,10 @@ void Rider::update(const RiderPoseIn& in) {
   int f0 = int(fp) % F, f1 = (f0 + 1) % F; float fr = fp - std::floor(fp);
   const size_t PS = size_t(nb) * 12;
   const float* A0 = &poses[f0 * PS]; const float* A1 = &poses[f1 * PS];
-  const float* B0 = &poses[(F + f0) * PS]; const float* B1 = &poses[(F + f1) * PS];
+  const float* PB0 = &poses[(F + f0) * PS]; const float* PB1 = &poses[(F + f1) * PS];
   float w00 = (1 - fr) * (1 - k), w01 = fr * (1 - k), w10 = (1 - fr) * k, w11 = fr * k;
   std::vector<ax::Mat4>& baked = bone;
-  for (int b = 0; b < nb; b++) { float e[12]; for (int i = 0; i < 12; i++) e[i] = A0[b * 12 + i] * w00 + A1[b * 12 + i] * w01 + B0[b * 12 + i] * w10 + B1[b * 12 + i] * w11; baked[b] = fromPose(e); }
+  for (int b = 0; b < nb; b++) { float e[12]; for (int i = 0; i < 12; i++) e[i] = A0[b * 12 + i] * w00 + A1[b * 12 + i] * w01 + PB0[b * 12 + i] * w10 + PB1[b * 12 + i] * w11; baked[b] = fromPose(e); }
   // honk / gulp (pelican.js)
   honkK = 0; if (in.honk) honkT = 0; if (in.gulp) gulpT = 0;
   if (honkT >= 0) { honkT += dt; honkK = std::sin(std::min(1.f, honkT / 0.9f) * PI); if (honkT > 0.9f) honkT = -1; }
