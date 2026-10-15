@@ -46,7 +46,12 @@ switch ($Platform) {
     $app = Get-ChildItem -Path $bin -Recurse -Directory -Filter 'PelicanBike.app' | Select-Object -First 1
     if (!$app) { throw "PelicanBike.app not found under $bin" }
     Push-Location $app.Parent.FullName
-    & ditto -c -k --sequesterRsrc --keepParent 'PelicanBike.app' (Join-Path $dist 'PelicanBike-macos.zip')
+    # ad-hoc sign: an unsigned arm64 .app downloaded from the internet is reported as "damaged" by Gatekeeper
+    & xattr -cr 'PelicanBike.app'
+    & codesign --force --deep -s - 'PelicanBike.app'
+    if ($LASTEXITCODE -ne 0) { throw "codesign failed" }
+    & codesign --verify --deep --strict 'PelicanBike.app'
+    & ditto -c -k --keepParent 'PelicanBike.app' (Join-Path $dist 'PelicanBike-macos.zip')
     Pop-Location
   }
   'android' {

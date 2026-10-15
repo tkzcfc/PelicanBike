@@ -77,7 +77,7 @@ python3 tools/wasm_serve.py --root build_wasm/bin/PelicanBike --port 8089
 - **推送到 `main`** 只构建 Web 并部署到 GitHub Pages：[https://tkzcfc.github.io/PelicanBike/](https://tkzcfc.github.io/PelicanBike/)。Web 版是单线程的（`AX_WASM_THREADS=0`），不需要 COOP/COEP 响应头。
 - 需要先启用 Pages：仓库 Settings → Pages → Build and deployment → **Source = GitHub Actions**。
 - Android 签名（可选）：在仓库 Secrets 里配置 `ANDROID_KEYSTORE_BASE64`（keystore 文件的 base64）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。不配置时 release APK 用 debug key 签名（可以安装，但不能上架）。
-- macOS 包没有签名和公证：首次打开时请右键 → 打开，或者运行 `xattr -dr com.apple.quarantine PelicanBike.app`。
+- macOS 包只做了 ad-hoc 签名，没有公证：首次打开时请右键 → 打开；如果 Gatekeeper 仍然阻止（例如提示“已损坏”），请在终端运行 `xattr -cr PelicanBike.app` 后再打开。
 - 渲染后端：自研 3D 层使用 OpenGL，所以 `CMakeLists.txt` 强制 Windows 使用原生 GL 3.3（不用 ANGLE），macOS 使用 OpenGL（不用 Metal），Android 使用 GLES 3.0。
 
 ## 用到的 Axmol 能力

@@ -77,7 +77,7 @@ python3 tools/wasm_serve.py --root build_wasm/bin/PelicanBike --port 8089
 - **Pushing to `main`** builds only Web and deploys it to GitHub Pages: [https://tkzcfc.github.io/PelicanBike/](https://tkzcfc.github.io/PelicanBike/). The web build is single-threaded (`AX_WASM_THREADS=0`), so no COOP/COEP headers are needed.
 - Enable Pages first: repo Settings → Pages → Build and deployment → **Source = GitHub Actions**.
 - Android signing (optional): add the repo secrets `ANDROID_KEYSTORE_BASE64` (base64 of the keystore file), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Without them the release APK is signed with the debug key (installable, but not for store upload).
-- The macOS build is not signed or notarized: right-click → Open the first time, or run `xattr -dr com.apple.quarantine PelicanBike.app`.
+- The macOS build is only ad-hoc signed, not notarized: right-click → Open the first time; if Gatekeeper still blocks it (e.g. "app is damaged"), run `xattr -cr PelicanBike.app` in Terminal and open it again.
 - Render backend: the custom 3D layer uses OpenGL, so `CMakeLists.txt` forces native GL 3.3 on Windows (not ANGLE), OpenGL on macOS (not Metal) and GLES 3.0 on Android.
 
 ## What Axmol provides
