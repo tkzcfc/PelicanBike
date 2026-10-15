@@ -23,7 +23,7 @@ struct RideState {
 };
 
 struct Settings { float volume = 0.8f, musicVolume = 0.55f; bool music = true; int quality = 2; bool bloom = true, scarf = true, helmet = true, showFps = false; int glasses = 0; /*0 auto 1 on 2 off*/ float cruise = 7.5f, hour = 17.35f, dayRate = 0.025f; bool timeFlow = true, autopilot = true, autoGear = true;
-  float cloud = 0.42f, fog = 1.f, waveAmp = 1.f, exposure = 1.f, bloomBoost = 1.f; float renderScale = 1.0f; int msaa = 4; int shadowSize = 2048; };
+  float cloud = 0.42f, fog = 1.f, waveAmp = 1.f, exposure = 1.f, bloomBoost = 1.f; float renderScale = 1.0f; int aa = 1; /* >0: FXAA post pass (replaces MSAA) */ int shadowSize = 2048; };
 
 struct FrameUBO {
   float viewProj[16], shadowMat[16];
@@ -90,7 +90,7 @@ class Game {
   bool project(V3 w, float& sx, float& sy) const { ax::Vec4 v(w.x, w.y, w.z, 1); viewProj.transformVector(&v); if (v.w <= 0) return false; sx = v.x / v.w; sy = v.y / v.w; return true; }
   void applyQuality(int q) {  // main.js QUALITY (DPR 1): low/medium/high/ultra
     static const float PR[4] = {0.8f, 1.f, 1.f, 1.f}; static const int SH[4] = {1024, 2048, 2048, 4096}, MS[4] = {0, 2, 4, 4};
-    q = std::max(0, std::min(3, q)); settings.quality = q; settings.renderScale = PR[q]; basePr = PR[q]; prCeiling = 1e9f; settings.shadowSize = SH[q]; settings.msaa = MS[q]; qualityBloom = q > 0; targetsDirty = true; for (auto& c : chunkIndex) c = -99999; }
+    q = std::max(0, std::min(3, q)); settings.quality = q; settings.renderScale = PR[q]; basePr = PR[q]; prCeiling = 1e9f; settings.shadowSize = SH[q]; settings.aa = MS[q]; qualityBloom = q > 0; targetsDirty = true; for (auto& c : chunkIndex) c = -99999; }
   bool qualityBloom = true, targetsDirty = false;
   // CSS backdrop-filter emulation: HUD/intro hand us rounded rects (window px, y up) blurred from a 1/4-res copy of the HDR frame
   struct BlurRect { float x0, y0, x1, y1, rad, amount; }; std::vector<BlurRect> blurRects;
@@ -119,7 +119,7 @@ class Game {
   FrameUBO F{};
   gfx::Shader skyS, oceanS, litStatic, litInst, litRider, litTerrain, litRoad;
   gfx::Shader shStatic, shInst, shRider, shTerrain;  // shadow variants (depth only)
-  gfx::Shader brightS, blurS, finalS;
+  gfx::Shader brightS, blurS, finalS, fxaaS;
   gfx::Mesh sky, ocean, road, strip, bulbs;
   gfx::Mesh terrain[7]; int chunkIndex[7];
   std::vector<gfx::PVertex> terrainScratch; std::vector<uint32_t> terrainIdx;
@@ -128,7 +128,7 @@ class Game {
   std::vector<float> chunkInst[7][P_N];
   float trickConfetti = 0, bellPulse = 0; Rider rider; bool honkReq = false, gulpReq = false; float glanceT = 0; int glanceKind = 0;
   gfx::Texture texRoad, texDetail;
-  gfx::RenderTarget shadowRT, hdrRT, bloomA[5], bloomB[5], blurA, blurB;
+  gfx::RenderTarget ldrRT, shadowRT, hdrRT, bloomA[5], bloomB[5], blurA, blurB;
   int rtW = 0, rtH = 0;
   // camera
   ax::Mat4 view, proj, viewProj, shadowVP; V3 camPos{-3.5f, 1.6f, 1.f}, camSmooth; bool camSmoothInit = false; float fov = 46;

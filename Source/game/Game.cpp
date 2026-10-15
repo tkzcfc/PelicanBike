@@ -4,7 +4,6 @@
 #include "platform/FileUtils.h"
 #include "base/Logging.h"
 #include <chrono>
-#include "gfx/GfxExt.h"
 #include <cstring>
 #include <cstdlib>
 
@@ -231,6 +230,7 @@ bool Game::init(int winW, int winH) {
   makeProg(brightS, "post", "bright", gfx::VL::Post);
   makeProg(blurS, "post", "blur", gfx::VL::Post);
   makeProg(finalS, "post", "final", gfx::VL::Post);
+  makeProg(fxaaS, "post", "fxaa", gfx::VL::Post);
   buildStatic();
   buildExtras();
   buildFx();
@@ -238,16 +238,16 @@ bool Game::init(int winW, int winH) {
   AXLOGI("[pb2] audio {}", audioOk ? "OpenAL stream" : "no device (silent)");
   makeProg(shBird, "shadow6", "shadow", gfx::VL::Packed, true);
   for (int s = 0; s < 7; s++) chunkIndex[s] = -99;
-  shadowRT.create(settings.shadowSize, settings.shadowSize, ColorFmt::RGBA8, true, 0, true);
+  shadowRT.create(settings.shadowSize, settings.shadowSize, ColorFmt::RGBA8, true, true);
   createTargets(winW, winH);
   update(0);
-  AXLOGI("[pb2] init done, render backend {}", gfx::ext::backendName());
+  AXLOGI("[pb2] init done, render backend {}", gfx::caps().api);
   return true;
 }
 
 void Game::createTargets(int w, int h) {
   rtW = std::max(16, int(w * settings.renderScale)); rtH = std::max(16, int(h * settings.renderScale));
-  hdrRT.create(rtW, rtH, ColorFmt::HDR, true, settings.msaa);
+  hdrRT.create(rtW, rtH, ColorFmt::HDR, true);
   int bw = (rtW + 1) / 2, bh = (rtH + 1) / 2;
   { int qw = std::max(1, rtW / 4), qh = std::max(1, rtH / 4); blurA.create(qw, qh, ColorFmt::HDR, false); blurB.create(qw, qh, ColorFmt::HDR, false); }
   for (int i = 0; i < 5; i++) { bloomA[i].create(std::max(1, bw), std::max(1, bh), ColorFmt::HDR, false); bloomB[i].create(std::max(1, bw), std::max(1, bh), ColorFmt::HDR, false); bw /= 2; bh /= 2; }
@@ -565,7 +565,7 @@ static bool aabbVisible(const ax::Mat4& vp, const float* mn, const float* mx, fl
 
 void Game::bindTex(const Shader& s, const gfx::Texture& t) {
   s.tex("uTex", 0, t.t);
-  s.set4("uOpt", dbgView, dfgOn, t.shaderSrgb ? 1.f : 0.f, float(settings.shadowSize));
+  s.set4("uOpt", dbgView, dfgOn, float((t.shaderSrgb ? 1 : 0) + (t.aniso && !std::getenv("PB2_NOANISO") ? 2 : 0)), float(settings.shadowSize));
 }
 
 void Game::drawScene(bool shadow) {
@@ -621,7 +621,7 @@ void Game::drawScene(bool shadow) {
 void Game::render(int winW, int winH) {
   double t0 = nowMs();
   g_stats.reset();
-  if (targetsDirty) { shadowRT.create(settings.shadowSize, settings.shadowSize, ColorFmt::RGBA8, true, 0, true); createTargets(winW, winH); targetsDirty = false; }
+  if (targetsDirty) { shadowRT.create(settings.shadowSize, settings.shadowSize, ColorFmt::RGBA8, true, true); createTargets(winW, winH); targetsDirty = false; }
   if (int(winW * settings.renderScale) != rtW || int(winH * settings.renderScale) != rtH) createTargets(winW, winH);
   ax::Mat4::createPerspective(fov, float(winW) / winH, 0.05f, 900.f, &proj);
   viewProj = proj * view;
@@ -639,31 +639,21 @@ void Game::render(int winW, int winH) {
   gfx::beginPass(&shadowRT, true, ONE, true);
   drawScene(true);
   gfx::endPass();
-  // 2) HDR scene (MSAA via GfxExt where available, resolved in endPass)
+  // 2) HDR scene (RGBA32F, no MSAA: FXAA runs on the tonemapped image)
   for (auto* s : sceneShaders) s->tex("uShadow", 1, shadowRT.color.t);
   gfx::beginPass(&hdrRT, true, BLACK, true);
   drawScene(false);
   gfx::endPass();
-  if (frameNo == (std::getenv("PB2_DUMPFRAME") ? std::atoi(std::getenv("PB2_DUMPFRAME")) : 30) && std::getenv("PB2_DUMPHDR")) {
-    std::vector<float> px;
-    if (gfx::ext::readFloatRGBA(hdrRT, px)) { FILE* f = fopen(std::getenv("PB2_DUMPHDR"), "wb"); if (f) { fwrite(&rtW, 4, 1, f); fwrite(&rtH, 4, 1, f); fwrite(px.data(), 4, px.size(), f); fclose(f); } }
-  }
-  static const bool sweepOn = std::getenv("PB2_SWEEP") != nullptr;
-  if (sweepOn) {  // NaN/Inf audit while sweeping hour (PB2_SWEEP=step)
-    settings.hour = std::fmod(settings.hour + float(std::atof(std::getenv("PB2_SWEEP"))), 24.f);
-    std::vector<float> px; gfx::ext::readFloatRGBA(hdrRT, px);
-    int bad = 0, fb = -1; float mx = 0; for (size_t i = 0; i < px.size(); i++) { if (!std::isfinite(px[i])) { if (!bad) fb = int(i / 4); bad++; } else mx = std::max(mx, px[i]); }
-    AXLOGI("[pb2] sweep h {:.3f} bad {} max {:.1f} at {} {} a {}", settings.hour, bad, mx, fb % rtW, fb / rtW, fb >= 0 ? px[fb * 4 + 3] : 0.f);
-  }
   // 3) bloom (UnrealBloomPass: high-pass + 5 mip separable gaussian)
+  const float man = gfx::caps().hdrLinear ? 0.f : 1.f;  // manual bilinear on HDR sources
   gfx::State post; post.depthTest = false; post.depthWrite = false; gfx::setState(post);
   static const int KR[5] = {6, 10, 14, 18, 22};  // UnrealBloomPass (r18x): sigma = r/3, paired bilinear taps
   gfx::beginPass(&bloomA[0], false, nullptr, false);
-  brightS.set4("uThreshold", bloomThreshold); brightS.tex("uSrc", 0, hdrRT.color.t); gfx::drawFullscreen(brightS);
+  brightS.set4("uThreshold", bloomThreshold, man); brightS.tex("uSrc", 0, hdrRT.color.t); gfx::drawFullscreen(brightS);
   gfx::endPass();
   auto blurPass = [&](gfx::RenderTarget& dst, bk::TextureBackend* src, float dx, float dy) {
     gfx::beginPass(&dst, false, nullptr, false);
-    float d[4]; memcpy(d, blurDirP, 16); d[0] = dx; d[1] = dy; blurS.set("uDirP", d, 16);
+    float d[4]; memcpy(d, blurDirP, 16); d[0] = dx; d[1] = dy; blurS.set("uDirP", d, 16); blurS.set4("uPostP", man);
     blurS.tex("uSrc", 0, src); gfx::drawFullscreen(blurS);
     gfx::endPass();
   };
@@ -687,10 +677,18 @@ void Game::render(int winW, int winH) {
     blurPass(blurB, hdrRT.color.t, 1.f / blurB.w, 0);
     blurPass(blurA, blurB.color.t, 0, 1.f / blurA.h);
   }
-  // 4) composite + grade + ACES + sRGB into Axmol's framebuffer
-  gfx::beginPass(nullptr, false, nullptr, false);
-  int vpX = 0, vpY = 0, vpW = gfx::passW(), vpH = gfx::passH();
-  { const auto& v = ax::Director::getInstance()->getRenderer()->getViewport(); vpX = v.x; vpY = v.y; }
+  // 4) composite + grade + ACES + sRGB: into Axmol's framebuffer, or into an RGBA8 target (luma in alpha) that
+  //    the FXAA pass then resolves into the framebuffer
+  const auto& vp = ax::Director::getInstance()->getRenderer()->getViewport();
+  const bool fxaa = settings.aa > 0;
+  int vpX = vp.x, vpY = vp.y, vpW = int(vp.width), vpH = int(vp.height);
+  if (fxaa) {
+    if (ldrRT.w != vpW || ldrRT.h != vpH || !ldrRT.rt) ldrRT.create(vpW, vpH, ColorFmt::RGBA8, false);
+    gfx::beginPass(&ldrRT, false, nullptr, false);
+    vpX = 0; vpY = 0;  // rects are in this target's pixels
+  } else {
+    gfx::beginPass(nullptr, false, nullptr, false);
+  }
   float bf[5]; static const float FAC[5] = {1.0f, 0.8f, 0.6f, 0.4f, 0.2f};
   static bool noBloom = std::getenv("PB2_NOBLOOM") != nullptr;
   static float bloomK = std::getenv("PB2_BLOOMK") ? std::atof(std::getenv("PB2_BLOOMK")) : 1.f;
@@ -707,8 +705,18 @@ void Game::render(int winW, int winH) {
   static const char* BN[5] = {"uB0", "uB1", "uB2", "uB3", "uB4"};
   for (int i = 0; i < 5; i++) finalS.tex(BN[i], 2 + i, bloomA[i].color.t);
   finalS.tex("uBlur", 7, blurA.color.t);
+  finalS.set4("uPostP", man, fxaa ? 1.f : 0.f);
   gfx::drawFullscreen(finalS);
   gfx::endPass();
+  if (fxaa) {  // 5) FXAA 3.11 quality into the window
+    gfx::beginPass(nullptr, false, nullptr, false);
+    static float fxSub = 0.75f, fxEdge = 0.166f;  // FXAA 3.11 defaults (subpix quality, edge threshold); PB2_FXAA=sub,edge
+    static bool fxInit = false; if (!fxInit) { fxInit = true; if (const char* e = std::getenv("PB2_FXAA")) std::sscanf(e, "%f,%f", &fxSub, &fxEdge); }
+    fxaaS.set4("uFx", 1.f / ldrRT.w, 1.f / ldrRT.h, fxSub, fxEdge);
+    fxaaS.tex("uSrc", 0, ldrRT.color.t);
+    gfx::drawFullscreen(fxaaS);
+    gfx::endPass();
+  }
   gfx::setState(gfx::State{});
   lastStats = g_stats; frameNo++;
   cpuRenderMs = float(nowMs() - t0);

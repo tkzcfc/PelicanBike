@@ -1,5 +1,6 @@
 #version 310 es
 #include "pb_fs_head.glsl"
+#include "pb_post.glsl"
 layout(binding = 0) uniform sampler2D uHdr;
 layout(binding = 2) uniform sampler2D uB0; layout(binding = 3) uniform sampler2D uB1; layout(binding = 4) uniform sampler2D uB2;
 layout(binding = 5) uniform sampler2D uB3; layout(binding = 6) uniform sampler2D uB4;
@@ -10,6 +11,7 @@ layout(std140, binding = 1) uniform fs_ub {
   vec4 uExpTime;  // x exposure, y time, z backdrop rect count, w framebuffer height (px)
   vec4 uRects[24];  // backdrop-filter rects (fb px, y up)
   vec4 uRectP[24];  // x radius, y amount, z px scale
+  vec4 uPostP;      // x manual bilinear, y write FXAA luma to alpha
 };
 float fixf(float x) { uint b = floatBitsToUint(x); if ((b & 0x7f800000u) == 0x7f800000u) return ((b & 0x007fffffu) == 0u && (b & 0x80000000u) == 0u) ? 48.0 : 0.0; return clamp(x, 0.0, 48.0); }
 float h(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -27,7 +29,8 @@ void main() {
 #ifdef METAL
   suv.y = 1.0 - suv.y;
 #endif
-  vec3 c = texture(uHdr, vUv).rgb; c = vec3(fixf(c.r), fixf(c.g), fixf(c.b));
+  bool man = uPostP.x > 0.5;
+  vec3 c = pbTex(uHdr, vUv, man); c = vec3(fixf(c.r), fixf(c.g), fixf(c.b));
   float shade = 0.0;
   int nr = int(uExpTime.z + 0.5);
   if (nr > 0) {
@@ -41,11 +44,11 @@ void main() {
       // box-shadow: 0 10px 40px rgba(0,0,0,.35) — outside the border box only
       float k = uRectP[i].z; vec2 q2 = abs(p + vec2(0.0, 10.0 * k) - (r.xy + hc)) - hc + rad; float ds = length(max(q2, 0.0)) + min(max(q2.x, q2.y), 0.0) - rad;
       shade = max(shade, 0.35 * uRectP[i].y * (1.0 - smoothstep(-40.0 * k, 40.0 * k, ds)) * clamp(d + 0.5, 0.0, 1.0)); }
-    if (m > 0.0) { vec3 bl = texture(uBlur, vUv).rgb; bl = vec3(fixf(bl.r), fixf(bl.g), fixf(bl.b)); float l = dot(bl, vec3(0.2126, 0.7152, 0.0722)); bl = max(mix(vec3(l), bl, 1.3), 0.0);
+    if (m > 0.0) { vec3 bl = pbTex(uBlur, vUv, man); bl = vec3(fixf(bl.r), fixf(bl.g), fixf(bl.b)); float l = dot(bl, vec3(0.2126, 0.7152, 0.0722)); bl = max(mix(vec3(l), bl, 1.3), 0.0);
       c = mix(c, bl, min(m, 1.0)); }
   }
-  vec3 b = texture(uB0, vUv).rgb * uBloomF.x + texture(uB1, vUv).rgb * uBloomF.y + texture(uB2, vUv).rgb * uBloomF.z
-         + texture(uB3, vUv).rgb * uBloomF.w + texture(uB4, vUv).rgb * uGrade.x;
+  vec3 b = pbTex(uB0, vUv, man) * uBloomF.x + pbTex(uB1, vUv, man) * uBloomF.y + pbTex(uB2, vUv, man) * uBloomF.z
+         + pbTex(uB3, vUv, man) * uBloomF.w + pbTex(uB4, vUv, man) * uGrade.x;
   vec3 col = c + b;
   vec2 cc = suv - 0.5; float r = length(cc);
   col *= mix(1.0, smoothstep(0.85, 0.2, r), uGrade.y);
@@ -54,5 +57,6 @@ void main() {
   col = aces(col);
   col = mix(pow(col, vec3(1.0 / 2.4)) * 1.055 - 0.055, col * 12.92, step(col, vec3(0.0031308)));
   col *= 1.0 - shade;
-  oCol = vec4(col, 1.0);
+  // FXAA reads perceptual luma from alpha (FXAA 3.11 "luma in alpha" convention)
+  oCol = vec4(col, uPostP.y > 0.5 ? dot(col, vec3(0.299, 0.587, 0.114)) : 1.0);
 }
