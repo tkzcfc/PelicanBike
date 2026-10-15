@@ -1,9 +1,10 @@
 #include "game/Game.h"
-#include "game/Shaders.h"
+#include "base/Director.h"
+#include "renderer/Renderer.h"
 #include "platform/FileUtils.h"
 #include "base/Logging.h"
 #include <chrono>
-#include "renderer/backend/opengl/OpenGLState.h"
+#include "gfx/GfxExt.h"
 #include <cstring>
 #include <cstdlib>
 
@@ -102,7 +103,7 @@ void Game::rebuildChunk(int slot, int index) {
       packV(terrainScratch[j * nx + i], s_xs[i], h, s_zs[j], n, c, 0.95f, 0);
     }
   }
-  if (!terrain[slot].vao) {
+  if (!terrain[slot].vb) {
     if (terrainIdx.empty())
       for (int j = 0; j < nz - 1; j++) for (int i = 0; i < nx - 1; i++) { uint32_t a = j * nx + i, b = a + nx; terrainIdx.insert(terrainIdx.end(), {a, b, a + 1, b, b + 1, a + 1}); }
     terrain[slot].createPacked(terrainScratch.data(), terrainScratch.size(), terrainIdx.data(), terrainIdx.size(), true);
@@ -157,29 +158,15 @@ void Game::uploadInstances() {
   instDirty = false;
 }
 
-GLuint makeProgX(Shader& s, const char* name, int mode, const char* vs, const char* fs);
-static GLuint makeProg(Shader& s, const char* name, int mode, const char* vs, const char* fs, bool skyfnVS = false) { (void)skyfnVS; return makeProgX(s, name, mode, vs, fs); }
-GLuint makeProgX(Shader& s, const char* name, int mode, const char* vs, const char* fs) {
-  bool skyfnVS = false;
-  std::string def = "#define MODE " + std::to_string(mode) + "\n";
-  std::string V = def + glsl::FRAME + (skyfnVS ? glsl::SKYFN : "") + vs;
-  std::string Fr = def + glsl::FRAME + glsl::SKYFN + fs;
-  s.build(name, V, Fr);
-  GLuint bi = glGetUniformBlockIndex(s.prog, "Frame");
-  if (bi != GL_INVALID_INDEX) glUniformBlockBinding(s.prog, bi, 0);
-  glUseProgram(s.prog);
-  GLint l;
-  if ((l = s.loc("uTex")) >= 0) glUniform1i(l, 0);
-  if ((l = s.loc("uShadow")) >= 0) glUniform1i(l, 1);
-  if ((l = s.loc("uSrc")) >= 0) glUniform1i(l, 0);
-  if ((l = s.loc("uHdr")) >= 0) glUniform1i(l, 0);
-  const char* b[5] = {"uB0", "uB1", "uB2", "uB3", "uB4"};
-  for (int i = 0; i < 5; i++) if ((l = s.loc(b[i])) >= 0) glUniform1i(l, 2 + i);
-  if ((l = s.loc("uTint")) >= 0) glUniform4f(l, 1, 1, 1, 1);
-  if ((l = s.loc("uDbg")) >= 0) glUniform1i(l, std::getenv("PB2_DBG") ? std::atoi(std::getenv("PB2_DBG")) : 0);
-  if ((l = s.loc("uDfg")) >= 0) glUniform1f(l, std::getenv("PB2_DFG") ? float(std::atof(std::getenv("PB2_DFG"))) : 0.f);
-  if ((l = s.loc("uModel")) >= 0) { ax::Mat4 I; glUniformMatrix4fv(l, 1, GL_FALSE, I.m); }
-  return s.prog;
+// Programs are cross-compiled by axslcc from Source/shaders (axslc/custom/<vs>_vs, <fs>_fs).
+void Game::makeProg(Shader& s, const char* vs, const char* fs, gfx::VL vl, bool shadowPass) {
+  if (!s.build(vs, fs, vl)) return;
+  static const float dbg = std::getenv("PB2_DBG") ? float(std::atoi(std::getenv("PB2_DBG"))) : 0.f, dfg = std::getenv("PB2_DFG") ? float(std::atof(std::getenv("PB2_DFG"))) : 0.f;
+  dbgView = dbg; dfgOn = dfg;
+  s.set4("uTint", 1, 1, 1, 1);
+  s.set4("uOpt", dbg, dfg, 0, float(settings.shadowSize));
+  ax::Mat4 I; s.setMat("uModel", I.m);
+  if (s.hasFrame()) (shadowPass ? shadowShaders : sceneShaders).push_back(&s);
 }
 
 void Game::buildStatic() {
@@ -218,7 +205,6 @@ void Game::buildStatic() {
     if (key >= 0) {
       prop[key].createPacked(part.v.data(), part.v.size(), part.i.data(), part.i.size());
       inst[key].create(7 * 48);
-      inst[key].attach(prop[key].vao);
     } else {
       std::vector<PVertex> v; std::vector<uint32_t> idx;
       for (int c = 0; c < 7; c++) { uint32_t b = (uint32_t)v.size(); for (auto pv : part.v) { pv.p[0] += c * CHUNK; v.push_back(pv); } for (auto i : part.i) idx.push_back(b + i); }
@@ -231,51 +217,40 @@ void Game::buildStatic() {
 }
 
 bool Game::init(int winW, int winH) {
-  GLint prevVao = 0, prevFbo = 0; glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVao); glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
   initCommon();
-  glGenBuffers(1, &ubo);
-  glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-  glBufferData(GL_UNIFORM_BUFFER, sizeof(FrameUBO), nullptr, GL_DYNAMIC_DRAW);
-  makeProg(skyS, "sky", 0, glsl::SKY_VS, glsl::SKY_FS);
-  makeProg(oceanS, "ocean", 0, glsl::OCEAN_VS, glsl::OCEAN_FS);
-  makeProg(litStatic, "lit0", 0, glsl::LIT_VS, glsl::LIT_FS);
-  makeProg(litInst, "lit1", 1, glsl::LIT_VS, glsl::LIT_FS);
-  makeProg(litRider, "lit2", 2, glsl::LIT_VS, glsl::LIT_FS);
-  makeProg(litTerrain, "lit3", 3, glsl::LIT_VS, glsl::LIT_FS);
-  makeProg(litRoad, "lit4", 4, glsl::LIT_VS, glsl::LIT_FS);
-  makeProg(shStatic, "sh0", 0, glsl::LIT_VS, glsl::SHADOW_FS);
-  makeProg(shInst, "sh1", 1, glsl::LIT_VS, glsl::SHADOW_FS);
-  makeProg(shRider, "sh2", 2, glsl::LIT_VS, glsl::SHADOW_FS);
-  makeProg(brightS, "bright", 0, glsl::FS_VS, glsl::BRIGHT_FS);
-  makeProg(blurS, "blur", 0, glsl::FS_VS, glsl::BLUR_FS);
-  makeProg(finalS, "final", 0, glsl::FS_VS, glsl::FINAL_FS);
+  makeProg(skyS, "sky", "sky");
+  makeProg(oceanS, "ocean", "ocean");
+  makeProg(litStatic, "lit0", "lit0");
+  makeProg(litInst, "lit1", "lit1");
+  makeProg(litRider, "lit2", "lit2");
+  makeProg(litTerrain, "lit3", "lit3");
+  makeProg(litRoad, "lit4", "lit4");
+  makeProg(shStatic, "shadow0", "shadow", gfx::VL::Packed, true);
+  makeProg(shInst, "shadow1", "shadow", gfx::VL::Packed, true);
+  makeProg(shRider, "shadow2", "shadow", gfx::VL::Packed, true);
+  makeProg(brightS, "post", "bright", gfx::VL::Post);
+  makeProg(blurS, "post", "blur", gfx::VL::Post);
+  makeProg(finalS, "post", "final", gfx::VL::Post);
   buildStatic();
   buildExtras();
   buildFx();
   audioOk = std::getenv("PB2_NOAUDIO") ? false : audio.init();
   AXLOGI("[pb2] audio {}", audioOk ? "OpenAL stream" : "no device (silent)");
-  makeProgX(shBird, "sh6", 6, glsl::LIT_VS, glsl::SHADOW_FS);
+  makeProg(shBird, "shadow6", "shadow", gfx::VL::Packed, true);
   for (int s = 0; s < 7; s++) chunkIndex[s] = -99;
-  shadowRT.create(settings.shadowSize, settings.shadowSize, 0, true);
+  shadowRT.create(settings.shadowSize, settings.shadowSize, ColorFmt::RGBA8, true, 0, true);
   createTargets(winW, winH);
-#ifdef GL_TIME_ELAPSED
-#  if PB_DESKTOP_GL
-  glGenQueries(2, gpuQuery); gpuQueryOk = true;
-#  endif
-#endif
   update(0);
-  glBindVertexArray(prevVao); glBindFramebuffer(GL_FRAMEBUFFER, prevFbo); glUseProgram(0);
-  ax::backend::OpenGLState::reset();
-  AXLOGI("[pb2] init done, axmol vao {}", prevVao);
+  AXLOGI("[pb2] init done, render backend {}", gfx::ext::backendName());
   return true;
 }
 
 void Game::createTargets(int w, int h) {
   rtW = std::max(16, int(w * settings.renderScale)); rtH = std::max(16, int(h * settings.renderScale));
-  hdrRT.create(rtW, rtH, GL_RGBA16F, false, settings.msaa, true);
+  hdrRT.create(rtW, rtH, ColorFmt::HDR, true, settings.msaa);
   int bw = (rtW + 1) / 2, bh = (rtH + 1) / 2;
-  { int qw = std::max(1, rtW / 4), qh = std::max(1, rtH / 4); blurA.create(qw, qh, GL_RGBA16F, false); blurB.create(qw, qh, GL_RGBA16F, false); }
-  for (int i = 0; i < 5; i++) { bloomA[i].create(std::max(1, bw), std::max(1, bh), GL_RGBA16F, false); bloomB[i].create(std::max(1, bw), std::max(1, bh), GL_RGBA16F, false); bw /= 2; bh /= 2; }
+  { int qw = std::max(1, rtW / 4), qh = std::max(1, rtH / 4); blurA.create(qw, qh, ColorFmt::HDR, false); blurB.create(qw, qh, ColorFmt::HDR, false); }
+  for (int i = 0; i < 5; i++) { bloomA[i].create(std::max(1, bw), std::max(1, bh), ColorFmt::HDR, false); bloomB[i].create(std::max(1, bw), std::max(1, bh), ColorFmt::HDR, false); bw /= 2; bh /= 2; }
 }
 
 // ---------------- simulation (main.js) ----------------
@@ -588,28 +563,32 @@ static bool aabbVisible(const ax::Mat4& vp, const float* mn, const float* mx, fl
   return true;
 }
 
+void Game::bindTex(const Shader& s, const gfx::Texture& t) {
+  s.tex("uTex", 0, t.t);
+  s.set4("uOpt", dbgView, dfgOn, t.shaderSrgb ? 1.f : 0.f, float(settings.shadowSize));
+}
+
 void Game::drawScene(bool shadow) {
   const ax::Mat4& vp = shadow ? shadowVP : viewProj;
   float shift = F.cloudOff[2];
-  auto setModel = [](const Shader& s, const ax::Mat4& m) { glUniformMatrix4fv(s.loc("uModel"), 1, GL_FALSE, m.m); };
   // rider
   {
-    const Shader& s = shadow ? shRider : litRider; s.use();
-    setModel(s, riderM); rider.draw(s);
-    const Shader& s0 = shadow ? shStatic : litStatic; s0.use();
+    const Shader& s = shadow ? shRider : litRider;
+    s.setMat("uModel", riderM.m); rider.draw(s);
+    const Shader& s0 = shadow ? shStatic : litStatic;
     // static world strips (guard rail, curb, lamps)
     ax::Mat4 M; ax::Mat4::createTranslation(shift, 0, 0, &M);
-    setModel(s0, M); strip.draw();
+    s0.setMat("uModel", M.m); gfx::draw(s0, strip);
   }
   // instanced vegetation / props: one draw per prototype for all 7 chunks
   {
-    const Shader& s = shadow ? shInst : litInst; s.use();
+    const Shader& s = shadow ? shInst : litInst;
     static const float SW[P_N][2] = {{0.018f, 1.4f}, {0.018f, 1.4f}, {0.03f, 3.0f}, {0, 99}, {0, 99}};
     for (int k = 0; k < P_N; k++) {
       if (!inst[k].count) continue;
       if (shadow && (k == P_PINE)) continue;
-      glUniform2f(s.loc("uSway"), SW[k][0], SW[k][1]);
-      prop[k].draw(inst[k].count);
+      s.set4("uSway", SW[k][0], SW[k][1]);
+      gfx::draw(s, prop[k], &inst[k]);
     }
   }
   drawExtras(shadow);
@@ -617,136 +596,120 @@ void Game::drawScene(bool shadow) {
   if (shadow) return;
   // terrain chunks (culled)
   {
-    litTerrain.use();
-    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texDetail.id);
+    bindTex(litTerrain, texDetail);
     for (int s = 0; s < 7; s++) {
       float ox = float(double(chunkIndex[s]) * CHUNK - S.distance);
       if (!aabbVisible(vp, terrain[s].bmin, terrain[s].bmax, ox)) continue;
-      ax::Mat4 M; ax::Mat4::createTranslation(ox, 0, 0, &M); setModel(litTerrain, M); terrain[s].draw();
+      ax::Mat4 M; ax::Mat4::createTranslation(ox, 0, 0, &M); litTerrain.setMat("uModel", M.m); gfx::draw(litTerrain, terrain[s]);
     }
-    litRoad.use();
-    glBindTexture(GL_TEXTURE_2D, texRoad.id);
-    ax::Mat4 M; ax::Mat4::createTranslation(shift, 0, 0, &M); setModel(litRoad, M); road.draw();
-    litStatic.use();
-    glUniform4f(litStatic.loc("uTint"), 1, 1, 1, -std::max(1e-4f, F.phaseB[2] / 8.f));
-    setModel(litStatic, M); bulbs.draw();
-    glUniform4f(litStatic.loc("uTint"), 1, 1, 1, 1);
+    bindTex(litRoad, texRoad);
+    ax::Mat4 M; ax::Mat4::createTranslation(shift, 0, 0, &M); litRoad.setMat("uModel", M.m); gfx::draw(litRoad, road);
+    litStatic.set4("uTint", 1, 1, 1, -std::max(1e-4f, F.phaseB[2] / 8.f));
+    litStatic.setMat("uModel", M.m); gfx::draw(litStatic, bulbs);
+    litStatic.set4("uTint", 1, 1, 1, 1);
   }
-  oceanS.use(); ocean.draw();
+  gfx::draw(oceanS, ocean);
   // sky last: depth LEQUAL at far plane, no depth write (early-z rejects covered pixels)
-  glDepthMask(GL_FALSE); glDepthFunc(GL_LEQUAL);
-  skyS.use(); sky.draw();
-  glDepthMask(GL_TRUE); glDepthFunc(GL_LESS);
+  gfx::State st; st.depthWrite = false; st.depthFunc = bk::CompareFunction::LESS_EQUAL; gfx::setState(st);
+  gfx::draw(skyS, sky);
+  st.depthFunc = bk::CompareFunction::LESS; gfx::setState(st);
   drawAdditive();
-  glEnable(GL_BLEND); glDepthMask(GL_FALSE); drawFxTransparent(); glDisable(GL_BLEND); glDepthMask(GL_TRUE);
+  drawFxTransparent();
+  gfx::setState(gfx::State{});
 }
 
 void Game::render(int winW, int winH) {
   double t0 = nowMs();
   g_stats.reset();
-  GLint prevFbo = 0, prevVp[4], prevVao = 0, prevProg = 0;
-  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo); glGetIntegerv(GL_VIEWPORT, prevVp); glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVao); glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
-  if (targetsDirty) { shadowRT.create(settings.shadowSize, settings.shadowSize, 0, true); createTargets(winW, winH); targetsDirty = false; }
+  if (targetsDirty) { shadowRT.create(settings.shadowSize, settings.shadowSize, ColorFmt::RGBA8, true, 0, true); createTargets(winW, winH); targetsDirty = false; }
   if (int(winW * settings.renderScale) != rtW || int(winH * settings.renderScale) != rtH) createTargets(winW, winH);
-#if PB_DESKTOP_GL
-  if (gpuQueryOk && frameNo > 2) { GLuint64 ns = 0; GLint avail = 0; glGetQueryObjectiv(gpuQuery[(frameNo + 1) & 1], GL_QUERY_RESULT_AVAILABLE, &avail); if (avail) { glGetQueryObjectui64v(gpuQuery[(frameNo + 1) & 1], GL_QUERY_RESULT, &ns); gpuMs = ns / 1e6f; } }
-#endif
-#if defined(GL_TIME_ELAPSED) && PB_DESKTOP_GL
-  if (gpuQueryOk) glBeginQuery(GL_TIME_ELAPSED, gpuQuery[frameNo & 1]);
-#endif
   ax::Mat4::createPerspective(fov, float(winW) / winH, 0.05f, 900.f, &proj);
   viewProj = proj * view;
   memcpy(F.viewProj, viewProj.m, 64);
   { ax::Vec3 fw(-view.m[2], -view.m[6], -view.m[10]); F.camFwd[0] = fw.x; F.camFwd[1] = fw.y; F.camFwd[2] = fw.z; F.camFwd[3] = rtH / (2 * std::tan(fov * PI / 360)); }
   F.camPos[0] = camPos.x; F.camPos[1] = camPos.y; F.camPos[2] = camPos.z; F.camPos[3] = S.t;
-  glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-  glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(FrameUBO), &F);
-  glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
+  // per-frame constants: every program carries its own copy (vs_ub.vF / fs_ub.fF); the shadow programs get the light VP
+  { FrameUBO sh = F; memcpy(sh.viewProj, shadowVP.m, 64);
+    for (auto* s : sceneShaders) { s->setFrame(&F, sizeof(F)); s->set4("uOpt", dbgView, dfgOn, 0, float(settings.shadowSize)); }
+    for (auto* s : shadowShaders) s->setFrame(&sh, sizeof(sh)); }
+  gfx::setState(gfx::State{});
+  static const float ONE[4] = {1, 1, 1, 1}, BLACK[4] = {0, 0, 0, 1};
 
-  glDisable(GL_BLEND); glDisable(GL_SCISSOR_TEST); glDisable(GL_STENCIL_TEST); glDisable(GL_CULL_FACE);
-  glEnable(GL_DEPTH_TEST); glDepthFunc(GL_LESS); glDepthMask(GL_TRUE); glColorMask(1, 1, 1, 1);
-
-  // 1) shadow map
-  shadowRT.bindDraw();
-  glClear(GL_DEPTH_BUFFER_BIT);
-  glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(1.5f, 3.f);
-  {  // shadow pass uses the light VP as uViewProj
-    FrameUBO tmp = F; memcpy(tmp.viewProj, shadowVP.m, 64);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, 64, tmp.viewProj);
-    drawScene(true);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, 64, F.viewProj);
-  }
-  glDisable(GL_POLYGON_OFFSET_FILL);
-  // 2) HDR scene
-  hdrRT.bindDraw();
-  glClearColor(0, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-  glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, shadowRT.depth.id); glActiveTexture(GL_TEXTURE0);
+  // 1) shadow map (depth packed into RGB8, polygon offset applied in shadow.frag)
+  gfx::beginPass(&shadowRT, true, ONE, true);
+  drawScene(true);
+  gfx::endPass();
+  // 2) HDR scene (MSAA via GfxExt where available, resolved in endPass)
+  for (auto* s : sceneShaders) s->tex("uShadow", 1, shadowRT.color.t);
+  gfx::beginPass(&hdrRT, true, BLACK, true);
   drawScene(false);
-  hdrRT.resolve();
+  gfx::endPass();
   if (frameNo == (std::getenv("PB2_DUMPFRAME") ? std::atoi(std::getenv("PB2_DUMPFRAME")) : 30) && std::getenv("PB2_DUMPHDR")) {
-    std::vector<float> px(size_t(rtW) * rtH * 4);
-    glBindFramebuffer(GL_FRAMEBUFFER, hdrRT.fbo); glReadPixels(0, 0, rtW, rtH, GL_RGBA, GL_FLOAT, px.data());
-    FILE* f = fopen(std::getenv("PB2_DUMPHDR"), "wb"); if (f) { fwrite(&rtW, 4, 1, f); fwrite(&rtH, 4, 1, f); fwrite(px.data(), 4, px.size(), f); fclose(f); }
+    std::vector<float> px;
+    if (gfx::ext::readFloatRGBA(hdrRT, px)) { FILE* f = fopen(std::getenv("PB2_DUMPHDR"), "wb"); if (f) { fwrite(&rtW, 4, 1, f); fwrite(&rtH, 4, 1, f); fwrite(px.data(), 4, px.size(), f); fclose(f); } }
   }
   static const bool sweepOn = std::getenv("PB2_SWEEP") != nullptr;
   if (sweepOn) {  // NaN/Inf audit while sweeping hour (PB2_SWEEP=step)
     settings.hour = std::fmod(settings.hour + float(std::atof(std::getenv("PB2_SWEEP"))), 24.f);
-    std::vector<float> px(size_t(rtW) * rtH * 4); glBindFramebuffer(GL_FRAMEBUFFER, hdrRT.fbo); glReadPixels(0, 0, rtW, rtH, GL_RGBA, GL_FLOAT, px.data());
+    std::vector<float> px; gfx::ext::readFloatRGBA(hdrRT, px);
     int bad = 0, fb = -1; float mx = 0; for (size_t i = 0; i < px.size(); i++) { if (!std::isfinite(px[i])) { if (!bad) fb = int(i / 4); bad++; } else mx = std::max(mx, px[i]); }
     AXLOGI("[pb2] sweep h {:.3f} bad {} max {:.1f} at {} {} a {}", settings.hour, bad, mx, fb % rtW, fb / rtW, fb >= 0 ? px[fb * 4 + 3] : 0.f);
   }
   // 3) bloom (UnrealBloomPass: high-pass + 5 mip separable gaussian)
-  glDisable(GL_DEPTH_TEST); glDepthMask(GL_FALSE);
+  gfx::State post; post.depthTest = false; post.depthWrite = false; gfx::setState(post);
   static const int KR[5] = {6, 10, 14, 18, 22};  // UnrealBloomPass (r18x): sigma = r/3, paired bilinear taps
-  bloomA[0].bindDraw(); brightS.use(); glUniform1f(brightS.loc("uThreshold"), bloomThreshold);
-  glBindTexture(GL_TEXTURE_2D, hdrRT.color.id); drawFullscreen();
-  blurS.use(); GLint lDir = blurS.loc("uDir"), lP = blurS.loc("uPairs"), lCW = blurS.loc("uCW"), lO = blurS.loc("uOff"), lW = blurS.loc("uW");
-  GLuint input = bloomA[0].color.id;
+  gfx::beginPass(&bloomA[0], false, nullptr, false);
+  brightS.set4("uThreshold", bloomThreshold); brightS.tex("uSrc", 0, hdrRT.color.t); gfx::drawFullscreen(brightS);
+  gfx::endPass();
+  auto blurPass = [&](gfx::RenderTarget& dst, bk::TextureBackend* src, float dx, float dy) {
+    gfx::beginPass(&dst, false, nullptr, false);
+    float d[4]; memcpy(d, blurDirP, 16); d[0] = dx; d[1] = dy; blurS.set("uDirP", d, 16);
+    blurS.tex("uSrc", 0, src); gfx::drawFullscreen(blurS);
+    gfx::endPass();
+  };
+  auto setKernel = [&](int kr) {
+    float c[24]; float sg = kr / 3.f; for (int k = 0; k < kr; k++) c[k] = 0.39894f * std::exp(-0.5f * k * k / (sg * sg)) / sg;
+    float ow[11 * 4] = {0}; int np = 0;
+    for (int k = 1; k < kr; k += 2) { float wa = c[k], wb = k + 1 < kr ? c[k + 1] : 0; ow[np * 4] = (k * wa + (k + 1) * wb) / (wa + wb); ow[np * 4 + 1] = wa + wb; np++; }
+    blurDirP[2] = float(np); blurDirP[3] = c[0]; blurS.set("uOW", ow, sizeof(ow));
+  };
+  bk::TextureBackend* input = bloomA[0].color.t;
   for (int i = 0; i < 5; i++) {
-    float c[24]; float sg = KR[i] / 3.f; for (int k = 0; k < KR[i]; k++) c[k] = 0.39894f * std::exp(-0.5f * k * k / (sg * sg)) / sg;
-    float off[11], w[11]; int np = 0;
-    for (int k = 1; k < KR[i]; k += 2) { float wa = c[k], wb = k + 1 < KR[i] ? c[k + 1] : 0; off[np] = (k * wa + (k + 1) * wb) / (wa + wb); w[np] = wa + wb; np++; }
-    glUniform1i(lP, np); glUniform1f(lCW, c[0]); glUniform1fv(lO, np, off); glUniform1fv(lW, np, w);
-    bloomB[i].bindDraw(); glUniform2f(lDir, 1.f / bloomB[i].w, 0); glBindTexture(GL_TEXTURE_2D, input); drawFullscreen();
-    bloomA[i].bindDraw(); glUniform2f(lDir, 0, 1.f / bloomA[i].h); glBindTexture(GL_TEXTURE_2D, bloomB[i].color.id); drawFullscreen();
-    input = bloomA[i].color.id;
+    setKernel(KR[i]);
+    blurPass(bloomB[i], input, 1.f / bloomB[i].w, 0);
+    blurPass(bloomA[i], bloomB[i].color.t, 0, 1.f / bloomA[i].h);
+    input = bloomA[i].color.t;
   }
   // 3b) backdrop blur source (only when some HUD glass is on screen): 1/4-res HDR, separable gaussian sigma ~3.3 texels (~13 px)
   int nBlur = std::min<int>(int(blurRects.size()), 24);
   if (nBlur > 0) {
-    float c[10]; const int KRb = 10; float sg = KRb / 3.f; for (int k = 0; k < KRb; k++) c[k] = 0.39894f * std::exp(-0.5f * k * k / (sg * sg)) / sg;
-    float off[5], w[5]; int np = 0; for (int k = 1; k < KRb; k += 2) { float wa = c[k], wb = k + 1 < KRb ? c[k + 1] : 0; off[np] = (k * wa + (k + 1) * wb) / (wa + wb); w[np] = wa + wb; np++; }
-    glUniform1i(lP, np); glUniform1f(lCW, c[0]); glUniform1fv(lO, np, off); glUniform1fv(lW, np, w);
-    blurB.bindDraw(); glUniform2f(lDir, 1.f / blurB.w, 0); glBindTexture(GL_TEXTURE_2D, hdrRT.color.id); drawFullscreen();
-    blurA.bindDraw(); glUniform2f(lDir, 0, 1.f / blurA.h); glBindTexture(GL_TEXTURE_2D, blurB.color.id); drawFullscreen();
+    setKernel(10);
+    blurPass(blurB, hdrRT.color.t, 1.f / blurB.w, 0);
+    blurPass(blurA, blurB.color.t, 0, 1.f / blurA.h);
   }
   // 4) composite + grade + ACES + sRGB into Axmol's framebuffer
-  glBindFramebuffer(GL_FRAMEBUFFER, prevFbo); glViewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]); g_stats.passes++;
-  finalS.use();
+  gfx::beginPass(nullptr, false, nullptr, false);
+  int vpX = 0, vpY = 0, vpW = gfx::passW(), vpH = gfx::passH();
+  { const auto& v = ax::Director::getInstance()->getRenderer()->getViewport(); vpX = v.x; vpY = v.y; }
   float bf[5]; static const float FAC[5] = {1.0f, 0.8f, 0.6f, 0.4f, 0.2f};
   static bool noBloom = std::getenv("PB2_NOBLOOM") != nullptr;
   static float bloomK = std::getenv("PB2_BLOOMK") ? std::atof(std::getenv("PB2_BLOOMK")) : 1.f;
   for (int i = 0; i < 5; i++) bf[i] = noBloom ? 0.f : 3.f * lerpf(FAC[i], 1.2f - FAC[i], 0.55f) * bloomStrength * bloomK;  // r186: "3.0 * bloomStrength"
-  glUniform4f(finalS.loc("uBloomF"), bf[0], bf[1], bf[2], bf[3]);
-  glUniform4f(finalS.loc("uGrade"), bf[4], 0.28f, warm, 0.035f);
-  glUniform2f(finalS.loc("uExpTime"), exposureVal, S.t); if (frameNo == 60) AXLOGI("[pb2] exp {} warm {} bloomS {} thr {}", exposureVal, warm, bloomStrength, bloomThreshold);
-  { float R[24 * 4], P[24 * 4]; float sx = float(prevVp[2]) / std::max(1, winW), sy = float(prevVp[3]) / std::max(1, winH);
-    for (int i = 0; i < nBlur; i++) { auto& b = blurRects[i]; R[i * 4] = b.x0 * sx + prevVp[0]; R[i * 4 + 1] = b.y0 * sy + prevVp[1]; R[i * 4 + 2] = b.x1 * sx + prevVp[0]; R[i * 4 + 3] = b.y1 * sy + prevVp[1];
+  finalS.set4("uBloomF", bf[0], bf[1], bf[2], bf[3]);
+  finalS.set4("uGrade", bf[4], 0.28f, warm, 0.035f);
+  float fbH = float(vpY + vpH);  // framebuffer height (Metal gl_FragCoord flip)
+  finalS.set4("uExpTime", exposureVal, S.t, float(nBlur), fbH); if (frameNo == 60) AXLOGI("[pb2] exp {} warm {} bloomS {} thr {}", exposureVal, warm, bloomStrength, bloomThreshold);
+  { float R[24 * 4] = {0}, P[24 * 4] = {0}; float sx = float(vpW) / std::max(1, winW), sy = float(vpH) / std::max(1, winH);
+    for (int i = 0; i < nBlur; i++) { auto& b = blurRects[i]; R[i * 4] = b.x0 * sx + vpX; R[i * 4 + 1] = b.y0 * sy + vpY; R[i * 4 + 2] = b.x1 * sx + vpX; R[i * 4 + 3] = b.y1 * sy + vpY;
       P[i * 4] = b.rad * sx; P[i * 4 + 1] = b.amount; P[i * 4 + 2] = sx; P[i * 4 + 3] = 0; }
-    glUniform1i(finalS.loc("uNR"), nBlur); if (nBlur) { glUniform4fv(finalS.loc("uRects"), nBlur, R); glUniform4fv(finalS.loc("uRectP"), nBlur, P); }
-    glUniform1i(finalS.loc("uBlur"), 7); glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D, blurA.color.id); }
-  glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, hdrRT.color.id);
-  for (int i = 0; i < 5; i++) { glActiveTexture(GL_TEXTURE2 + i); glBindTexture(GL_TEXTURE_2D, bloomA[i].color.id); }
-  glActiveTexture(GL_TEXTURE0);
-  drawFullscreen();
-#if defined(GL_TIME_ELAPSED) && PB_DESKTOP_GL
-  if (gpuQueryOk) glEndQuery(GL_TIME_ELAPSED);
-#endif
-  // restore for Axmol
-  glDepthMask(GL_TRUE); glEnable(GL_DEPTH_TEST);
-  glBindVertexArray(prevVao); glUseProgram(prevProg);
-  for (int i = 7; i >= 0; i--) { glActiveTexture(GL_TEXTURE0 + i); glBindTexture(GL_TEXTURE_2D, 0); }
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
+    if (nBlur) { finalS.set("uRects", R, size_t(nBlur) * 16); finalS.set("uRectP", P, size_t(nBlur) * 16); } }
+  finalS.tex("uHdr", 0, hdrRT.color.t);
+  static const char* BN[5] = {"uB0", "uB1", "uB2", "uB3", "uB4"};
+  for (int i = 0; i < 5; i++) finalS.tex(BN[i], 2 + i, bloomA[i].color.t);
+  finalS.tex("uBlur", 7, blurA.color.t);
+  gfx::drawFullscreen(finalS);
+  gfx::endPass();
+  gfx::setState(gfx::State{});
   lastStats = g_stats; frameNo++;
   cpuRenderMs = float(nowMs() - t0);
 }

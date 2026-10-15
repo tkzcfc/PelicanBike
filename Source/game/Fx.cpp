@@ -1,5 +1,4 @@
 #include "game/Game.h"
-#include "game/Shaders.h"
 #include <cmath>
 using namespace gfx;
 namespace pb {
@@ -17,40 +16,17 @@ void PSys::update(float dt, float scroll) {
   }
 }
 
-GLuint makeProgX(Shader& s, const char* name, int mode, const char* vs, const char* fs);
-static const char* PART_VS = R"(
-in vec3 aPos; in vec4 aCol; in vec4 aMat; out vec4 vC;
-void main() { gl_Position = uViewProj * vec4(aPos, 1.0); float z = max(dot(aPos - uCamPos.xyz, uCamFwd.xyz), 0.1);
-  gl_PointSize = aMat.x * uCamFwd.w / z; vC = aCol; }
-)";
-static const char* PART_FS = R"(
-uniform int uHalo; in vec4 vC; out vec4 oCol;
-void main() { float d = length(gl_PointCoord - 0.5); float a;
-  if (uHalo == 1) { float r = d * 2.0; a = r < 0.25 ? mix(1.0, 0.8, r / 0.25) : mix(0.8, 0.0, clamp((r - 0.25) / 0.75, 0.0, 1.0)); }
-  else a = smoothstep(0.5, 0.05, d);
-  a *= vC.a; if (a < 0.003) discard; oCol = vec4(vC.rgb, a); }
-)";
-static const char* LINE_VS = R"(
-in vec3 aPos; void main() { gl_Position = uViewProj * vec4(aPos, 1.0); }
-)";
-static const char* LINE_FS = R"(
-uniform float uOpacity; out vec4 oCol; void main() { oCol = vec4(1.0, 1.0, 1.0, uOpacity); }
-)";
+// particle / speed-line shaders: Source/shaders/part.*, line.*
 
 void Game::buildFx() {
   dust.init(420, 0.35f); sparkles.init(360, 1); splash.init(360, 1);
   std::vector<PbmPart> parts; loadPbm("data/world2.pbm", parts);
   for (auto& p : parts) { if (p.name == "fish") fishMesh.createPacked(p.v.data(), p.v.size(), p.i.data(), p.i.size()); if (p.name == "fishgold") goldMesh.createPacked(p.v.data(), p.v.size(), p.i.data(), p.i.size()); }
-  fishI.create(17); fishI.attach(fishMesh.vao); goldI.create(12); goldI.attach(goldMesh.vao);
-  // particle stream: pos3 | rgba | size
-  glGenVertexArrays(1, &partVao); glGenBuffers(1, &partVbo);
-  glBindVertexArray(partVao); glBindBuffer(GL_ARRAY_BUFFER, partVbo); glBufferData(GL_ARRAY_BUFFER, 1300 * 32, nullptr, GL_DYNAMIC_DRAW);
-  glEnableVertexAttribArray(A_POS); glVertexAttribPointer(A_POS, 3, GL_FLOAT, GL_FALSE, 32, (void*)0);
-  glEnableVertexAttribArray(A_COL); glVertexAttribPointer(A_COL, 4, GL_FLOAT, GL_FALSE, 32, (void*)12);
-  glEnableVertexAttribArray(A_MAT); glVertexAttribPointer(A_MAT, 1, GL_FLOAT, GL_FALSE, 32, (void*)28);
-  glBindVertexArray(0);
-  makeProgX(partS, "part", 0, PART_VS, PART_FS);
-  makeProgX(lineS, "line", 0, LINE_VS, LINE_FS);
+  fishI.create(17); goldI.create(12); fishIS.create(17); goldIS.create(12);
+  // particle stream: pos3 | rgba | size (32 B)
+  { std::vector<float> z(1300 * 8, 0.f); partMesh.createRaw(z.data(), z.size() * 4, 1300, true); partMesh.prim = bk::PrimitiveType::POINT; }
+  makeProg(partS, "part", "part", gfx::VL::Particle);
+  makeProg(lineS, "line", "line");
   // confetti (220 quads, CPU-transformed), scarf (16x2 strip), speed lines (70 segments)
   { Mulberry r(3); static const uint32_t PAL[7] = {0xff595e, 0xffca3a, 0x8ac926, 0x1982c4, 0x6a4c93, 0xffffff, 0xff8fab};
     confetti.resize(220); confV.resize(220 * 4); std::vector<uint32_t> idx;
@@ -65,7 +41,7 @@ void Game::buildFx() {
     for (uint32_t i = 0; i < 15; i++) { uint32_t a = i * 2; idx.insert(idx.end(), {a, a + 1, a + 2, a + 1, a + 3, a + 2}); }
     scarfMesh.createPacked(scarfV.data(), 32, idx.data(), idx.size(), true); }
   { Mulberry r(77); lineSeeds.resize(70); for (auto& s : lineSeeds) { float a = r() * TAU, rr = 0.9f + r() * 2.4f; s = V3(std::cos(a) * rr, std::sin(a) * rr * 0.65f, -r() * 14 - 1); }
-    std::vector<PVertex> v(140, PVertex{}); lineMesh.createPacked(v.data(), 140, nullptr, 0, true); lineMesh.prim = GL_LINES; }
+    std::vector<PVertex> v(140, PVertex{}); lineMesh.createPacked(v.data(), 140, nullptr, 0, true); lineMesh.prim = bk::PrimitiveType::LINE; }
 }
 
 int Game::nextFish(float range) const {
@@ -209,11 +185,12 @@ void Game::drawFx(bool shadow) {
   float nf[17 * 12], gf[12 * 12]; int cn = 0, cg = 0;
   for (auto& f : fishes) if (f.active) put34m(f.golden ? &gf[cg++ * 12] : &nf[cn++ * 12], f.pos, f.rx, f.ry, 0, f.scale);
   if (!shadow) for (auto& j : jumpers) if (j.t >= 0) put34m(&nf[cn++ * 12], j.pos, 0, j.ry, j.rz, 1.8f);
-  const Shader& bs = shadow ? shBird : litBird; bs.use();
-  if (cn) { fishI.upload(nf, cn); fishMesh.draw(cn); }
-  if (cg) { goldI.upload(gf, cg); goldMesh.draw(cg); }
-  const Shader& s = shadow ? shStatic : litStatic; s.use(); ax::Mat4 I; glUniformMatrix4fv(s.loc("uModel"), 1, GL_FALSE, I.m);
-  if (settings.scarf && scarfInit) { if (scarfDirty) { scarfMesh.updatePacked(scarfV.data(), 32); scarfDirty = false; } scarfMesh.draw(); }
+  const Shader& bs = shadow ? shBird : litBird;
+  InstanceBuf& fi = shadow ? fishIS : fishI; InstanceBuf& gi = shadow ? goldIS : goldI;
+  if (cn) { fi.upload(nf, cn); gfx::draw(bs, fishMesh, &fi); }
+  if (cg) { gi.upload(gf, cg); gfx::draw(bs, goldMesh, &gi); }
+  const Shader& s = shadow ? shStatic : litStatic; ax::Mat4 I; s.setMat("uModel", I.m);
+  if (settings.scarf && scarfInit) { if (scarfDirty) { scarfMesh.updatePacked(scarfV.data(), 32); scarfDirty = false; } gfx::draw(s, scarfMesh); }
   if (confActive) {
     if (confDirty) {
       for (size_t i = 0; i < confetti.size(); i++) { auto& p = confetti[i]; float sc = p.life > 0 ? std::min(1.f, p.life) : 0;
@@ -221,7 +198,7 @@ void Game::drawFx(bool shadow) {
         for (int k = 0; k < 4; k++) { ax::Vec3 q((k & 1 ? 0.025f : -0.025f) * sc, (k & 2 ? -0.014f : 0.014f) * sc, 0), nrm(0, 0, 1); R.transformVector(&q); R.transformVector(&nrm);
           PVertex& v = confV[i * 4 + k]; v.p[0] = p.pos.x + q.x; v.p[1] = p.pos.y + q.y; v.p[2] = p.pos.z + q.z; v.n[0] = int8_t(nrm.x * 127); v.n[1] = int8_t(nrm.y * 127); v.n[2] = int8_t(nrm.z * 127); } }
       confMesh.updatePacked(confV.data(), confV.size()); confDirty = false; }
-    confMesh.draw();
+    gfx::draw(s, confMesh);
   }
 }
 
@@ -234,20 +211,19 @@ void Game::drawFxTransparent() {
   push(sparkles); int nAdd = int(buf.size() / 8) - nNormal;
   Col cy = hexLin(0x7fe3ff), gd = hexLin(0xffd257); int nHalo = 0;
   for (auto& f : fishes) if (f.active && f.caught < 0) { Col c = f.golden ? gd : cy; buf.insert(buf.end(), {f.pos.x, f.pos.y, f.pos.z, c.r, c.g, c.b, f.haloA, 0.9f}); nHalo++; }
+  gfx::State st = gfx::state(); st.depthWrite = false;
   if (!buf.empty()) {
-#if PB_DESKTOP_GL
-    glEnable(GL_PROGRAM_POINT_SIZE);
-#endif
-    glBindBuffer(GL_ARRAY_BUFFER, partVbo); glBufferSubData(GL_ARRAY_BUFFER, 0, std::min<size_t>(buf.size(), 1300 * 8) * 4, buf.data());
-    partS.use(); glBindVertexArray(partVao); GLint lh = partS.loc("uHalo");
-    if (nNormal) { glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glUniform1i(lh, 0); glDrawArrays(GL_POINTS, 0, nNormal); g_stats.draws++; }
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    if (nAdd) { glUniform1i(lh, 0); glDrawArrays(GL_POINTS, nNormal, nAdd); g_stats.draws++; }
-    if (nHalo) { glUniform1i(lh, 1); glDrawArrays(GL_POINTS, nNormal + nAdd, nHalo); g_stats.draws++; }
+    size_t nf = std::min<size_t>(buf.size(), 1300 * 8);
+    partMesh.updateRaw(buf.data(), nf * 4);
+    if (nNormal) { st.blend = gfx::Blend::Alpha; gfx::setState(st); partS.set4("uHalo", 0); gfx::drawArrays(partS, partMesh, bk::PrimitiveType::POINT, 0, nNormal); }
+    st.blend = gfx::Blend::Add; gfx::setState(st);
+    if (nAdd) { partS.set4("uHalo", 0); gfx::drawArrays(partS, partMesh, bk::PrimitiveType::POINT, nNormal, nAdd); }
+    if (nHalo) { partS.set4("uHalo", 1); gfx::drawArrays(partS, partMesh, bk::PrimitiveType::POINT, nNormal + nAdd, nHalo); }
   }
   if (lineOpacity > 0.0035f) {
     if (lineDirty) { static std::vector<PVertex> v(140, PVertex{}); for (int i = 0; i < 140; i++) { v[i].p[0] = lineV[i].x; v[i].p[1] = lineV[i].y; v[i].p[2] = lineV[i].z; } lineMesh.updatePacked(v.data(), 140); lineDirty = false; }
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE); lineS.use(); glUniform1f(lineS.loc("uOpacity"), lineOpacity); lineMesh.draw();
+    st.blend = gfx::Blend::Add; gfx::setState(st); lineS.set4("uOpacity", lineOpacity); gfx::draw(lineS, lineMesh);
   }
+  st.blend = gfx::Blend::Off; gfx::setState(st);
 }
 }  // namespace pb

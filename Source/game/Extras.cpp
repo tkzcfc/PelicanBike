@@ -2,7 +2,6 @@
 // waves, gull circles + pelican V-formation (instanced 3x4 matrices), road signs, fireflies,
 // lamp light pools. All cheap: ~16 draws total.
 #include "game/Game.h"
-#include "game/Shaders.h"
 #include "platform/FileUtils.h"
 #include <cmath>
 using namespace gfx;
@@ -15,7 +14,6 @@ static float waveHeight(double x, double z, double t, float amp) {
   return float(SEA_LEVEL + y);
 }
 
-GLuint makeProgX(Shader& s, const char* name, int mode, const char* vs, const char* fs);
 
 void Game::buildExtras() {
   std::vector<PbmPart> parts; loadPbm("data/world2.pbm", parts);
@@ -27,7 +25,7 @@ void Game::buildExtras() {
     if (m) m->createPacked(p.v.data(), p.v.size(), p.i.data(), p.i.size());
   }
   Mesh* bm[4] = {&gullBody, &gullWing, &pelBody, &pelWing}; int cap[4] = {9, 18, 3, 6};
-  for (int i = 0; i < 4; i++) { birdI[i].create(cap[i]); birdI[i].attach(bm[i]->vao); birdData[i].resize(cap[i] * 12); }
+  for (int i = 0; i < 4; i++) { birdI[i].create(cap[i]); birdData[i].resize(cap[i] * 12); }
   // sign plate: PlaneGeometry(1.1,1.1).rotateY(-PI/2), double sided, alphaTest 0.4, roughness 0.5
   { std::vector<PVertex> v(4); uint32_t idx[6] = {0, 1, 2, 2, 1, 3};
     for (int k = 0; k < 4; k++) { PVertex& p = v[k]; p = PVertex{}; p.p[0] = 0; p.p[1] = (k & 2) ? -0.55f : 0.55f; p.p[2] = (k & 1) ? 0.55f : -0.55f;
@@ -38,7 +36,7 @@ void Game::buildExtras() {
   // fireflies (mulberry32(5))
   { Mulberry rr(5); std::vector<PVertex> v(160);
     for (auto& p : v) { p = PVertex{}; p.p[0] = rr() * 200 - 60; p.p[1] = 0.4f + rr() * 2.6f; p.p[2] = 4.5f + rr() * 22; p.c[0] = uint8_t(rr() * 255); }
-    ffMesh.createPacked(v.data(), v.size(), nullptr, 0); ffMesh.prim = GL_POINTS; }
+    ffMesh.createPacked(v.data(), v.size(), nullptr, 0); ffMesh.prim = bk::PrimitiveType::POINT; }
   // lamp pools: CircleGeometry(3.4) scaled 1.25 in x at LAMP_X, z 1.3, over 7 chunks
   { std::vector<PVertex> v; std::vector<uint32_t> idx;
     for (int c = 0; c < 7; c++) for (float lx : {12.f, 48.f}) { uint32_t b = (uint32_t)v.size();
@@ -46,11 +44,11 @@ void Game::buildExtras() {
         p.c[0] = uint8_t(u * 255); p.c[1] = uint8_t(w * 255); v.push_back(p); }
       idx.insert(idx.end(), {b, b + 2, b + 1, b + 1, b + 2, b + 3}); }
     pools.createPacked(v.data(), v.size(), idx.data(), idx.size()); }
-  makeProgX(litBird, "lit6", 6, glsl::LIT_VS, glsl::LIT_FS);
-  makeProgX(litSign, "lit5", 5, glsl::LIT_VS, glsl::LIT_FS);
-  makeProgX(beamS, "beam", 0, glsl::BEAM_VS, glsl::BEAM_FS);
-  makeProgX(ffS, "ff", 0, glsl::FF_VS, glsl::FF_FS);
-  makeProgX(poolS, "pool", 0, glsl::POOL_VS, glsl::POOL_FS);
+  makeProg(litBird, "lit6", "lit6");
+  makeProg(litSign, "lit5", "lit5");
+  makeProg(beamS, "beam", "beam");
+  makeProg(ffS, "ff", "ff");
+  makeProg(poolS, "pool", "pool");
 }
 
 static void put34(float* d, const ax::Mat4& m) { for (int r = 0; r < 3; r++) { d[r * 4] = m.m[r]; d[r * 4 + 1] = m.m[4 + r]; d[r * 4 + 2] = m.m[8 + r]; d[r * 4 + 3] = m.m[12 + r]; } }
@@ -96,35 +94,31 @@ void Game::updateExtras(float dt) {
 }
 
 void Game::drawExtras(bool shadow) {
-  const Shader& s = shadow ? shStatic : litStatic; s.use(); GLint lm = s.loc("uModel");
-  glUniformMatrix4fv(lm, 1, GL_FALSE, lhM.m); lhStatic.draw();
-  if (!shadow) { glUniform4f(s.loc("uTint"), 1, 1, 1, lanternE / 8.f); lhLantern.draw(); glUniform4f(s.loc("uTint"), 1, 1, 1, 1); }
-  if (!shadow) for (int i = 0; i < 5; i++) { if (std::fabs(boatM[i].m[12]) > 330) continue; glUniformMatrix4fv(lm, 1, GL_FALSE, boatM[i].m); boat[i].draw(); }
+  const Shader& s = shadow ? shStatic : litStatic;
+  s.setMat("uModel", lhM.m); gfx::draw(s, lhStatic);
+  if (!shadow) { s.set4("uTint", 1, 1, 1, lanternE / 8.f); gfx::draw(s, lhLantern); s.set4("uTint", 1, 1, 1, 1); }
+  if (!shadow) for (int i = 0; i < 5; i++) { if (std::fabs(boatM[i].m[12]) > 330) continue; s.setMat("uModel", boatM[i].m); gfx::draw(s, boat[i]); }
   // signs on odd chunks (x=30, z=3.55)
   for (int sl = 0; sl < 7; sl++) {
     int idx = chunkIndex[sl]; if ((idx & 1) == 0) continue;
     float ox = float(double(idx) * CHUNK - S.distance) + 30; if (ox < -40 || ox > 260) continue;
-    ax::Mat4 M; ax::Mat4::createTranslation(ox, 0.14f, 3.55f, &M); s.use(); glUniformMatrix4fv(lm, 1, GL_FALSE, M.m); signPost.draw();
-    const Shader& ps = shadow ? shStatic : litSign; ps.use();  // plate (alpha tested; shadow uses full quad)
-    ax::Mat4 P; ax::Mat4::createTranslation(ox - 0.03f, 2.19f, 3.55f, &P); glUniformMatrix4fv(ps.loc("uModel"), 1, GL_FALSE, P.m);
-    if (!shadow) { glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texSign[std::abs(int(std::floor(idx / 2.0))) % 3].id); }
-    signPlate.draw();
+    ax::Mat4 M; ax::Mat4::createTranslation(ox, 0.14f, 3.55f, &M); s.setMat("uModel", M.m); gfx::draw(s, signPost);
+    const Shader& ps = shadow ? shStatic : litSign;  // plate (alpha tested; shadow uses full quad)
+    ax::Mat4 P; ax::Mat4::createTranslation(ox - 0.03f, 2.19f, 3.55f, &P); ps.setMat("uModel", P.m);
+    if (!shadow) bindTex(ps, texSign[std::abs(int(std::floor(idx / 2.0))) % 3]);
+    gfx::draw(ps, signPlate);
   }
   if (shadow) return;
   if (birdDirty) { birdI[0].upload(birdData[0].data(), 9); birdI[1].upload(birdData[1].data(), 18); birdI[2].upload(birdData[2].data(), 3); birdI[3].upload(birdData[3].data(), 6); birdDirty = false; }
-  litBird.use(); gullBody.draw(9); gullWing.draw(18); pelBody.draw(3); pelWing.draw(6);
+  gfx::draw(litBird, gullBody, &birdI[0]); gfx::draw(litBird, gullWing, &birdI[1]); gfx::draw(litBird, pelBody, &birdI[2]); gfx::draw(litBird, pelWing, &birdI[3]);
 }
 
-void Game::drawAdditive() {
-  glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE); glDepthMask(GL_FALSE);
+void Game::drawAdditive() {  // three AdditiveBlending (SRC_ALPHA, ONE), no depth write
+  gfx::State st = gfx::state(); st.blend = gfx::Blend::Add; st.depthWrite = false; gfx::setState(st);
   float beamN = smoothstepf(0.2f, 0.8f, night), ffN = smoothstepf(0.35f, 0.9f, night), poolO = smoothstepf(0.2f, 0.7f, night) * 0.5f;
-  if (beamN > 0.001f) { beamS.use(); glUniform1f(beamS.loc("uNight"), beamN); for (int i = 0; i < 2; i++) { glUniformMatrix4fv(beamS.loc("uModel"), 1, GL_FALSE, beamM[i].m); lhBeam.draw(); } }
-  if (poolO > 0.001f) { poolS.use(); glUniform1f(poolS.loc("uOpacity"), poolO); ax::Mat4 M; ax::Mat4::createTranslation(F.cloudOff[2], 0, 0, &M); glUniformMatrix4fv(poolS.loc("uModel"), 1, GL_FALSE, M.m); pools.draw(); }
-  if (ffN > 0.001f) {
-#if PB_DESKTOP_GL
-    glEnable(GL_PROGRAM_POINT_SIZE);
-#endif
-    ffS.use(); glUniform1f(ffS.loc("uNight"), ffN); glUniform1f(ffS.loc("uOffset"), float(std::fmod(S.distance, 200.0))); ffMesh.draw(); }
-  glDisable(GL_BLEND); glDepthMask(GL_TRUE);
+  if (beamN > 0.001f) { beamS.set4("uNight", beamN); for (int i = 0; i < 2; i++) { beamS.setMat("uModel", beamM[i].m); gfx::draw(beamS, lhBeam); } }
+  if (poolO > 0.001f) { poolS.set4("uOpacity", poolO); ax::Mat4 M; ax::Mat4::createTranslation(F.cloudOff[2], 0, 0, &M); poolS.setMat("uModel", M.m); gfx::draw(poolS, pools); }
+  if (ffN > 0.001f) { ffS.set4("uNight", ffN); ffS.set4("uOffset", float(std::fmod(S.distance, 200.0))); gfx::draw(ffS, ffMesh); }
+  st.blend = gfx::Blend::Off; gfx::setState(st);
 }
 }  // namespace pb

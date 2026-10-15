@@ -167,8 +167,8 @@ void Rider::update(const RiderPoseIn& in) {
 V3 Rider::mouthPos() const { return xf(bone[headB], V3(0.1999f, -0.0956f, 0)); }
 
 void Rider::draw(const Shader& s) {
-  glUniform4fv(s.loc("uBones"), nb * 3, palette.data());
+  s.set("uBones", palette.data(), size_t(nb) * 48);  // nb bones x 3 rows (vec4 uBones[144])
   if (neckDirty) { neck.updatePacked(neckV.data(), neckV.size()); neckDirty = false; }
-  mesh.draw(); neck.draw();
+  gfx::draw(s, mesh); gfx::draw(s, neck);
 }
 }  // namespace pb

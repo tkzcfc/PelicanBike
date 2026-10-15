@@ -75,6 +75,10 @@ class Game {
   gfx::InstanceBuf birdI[4]; std::vector<float> birdData[4]; bool birdDirty = true;
   gfx::Texture texSign[3];
   gfx::Shader litBird, litSign, beamS, ffS, poolS;
+  std::vector<gfx::Shader*> sceneShaders, shadowShaders;  // programs that take the per-frame constants
+  void makeProg(gfx::Shader& s, const char* vs, const char* fs, gfx::VL vl = gfx::VL::Packed, bool shadowPass = false);
+  void bindTex(const gfx::Shader& s, const gfx::Texture& t);
+  float dbgView = 0, dfgOn = 0, blurDirP[4] = {0, 0, 0, 0};
   ax::Mat4 lhM, boatM[5], beamM[2]; float lanternE = 0.4f;
  public:
   // gameplay fx (Fx.cpp)
@@ -107,12 +111,12 @@ class Game {
   std::vector<ConfettiP> confetti; std::vector<gfx::PVertex> confV; gfx::Mesh confMesh; bool confActive = false, confDirty = false;
   std::vector<V3> scarfP, scarfQ; std::vector<gfx::PVertex> scarfV; gfx::Mesh scarfMesh; bool scarfInit = false, scarfDirty = false;
   std::vector<V3> lineSeeds; V3 lineV[140]; gfx::Mesh lineMesh; float lineOpacity = 0; bool lineDirty = false;
-  gfx::Mesh fishMesh, goldMesh; gfx::InstanceBuf fishI, goldI; GLuint partVao = 0, partVbo = 0; std::vector<float> partBuf;
+  gfx::Mesh fishMesh, goldMesh, partMesh; gfx::InstanceBuf fishI, goldI, fishIS, goldIS; std::vector<float> partBuf;  // *IS: shadow-pass copies (Metal: one upload per buffer per frame)
   gfx::Shader partS, lineS, shBird;
   float envHour = -99;
 
   // GPU objects
-  GLuint ubo = 0; FrameUBO F{};
+  FrameUBO F{};
   gfx::Shader skyS, oceanS, litStatic, litInst, litRider, litTerrain, litRoad;
   gfx::Shader shStatic, shInst, shRider, shTerrain;  // shadow variants (depth only)
   gfx::Shader brightS, blurS, finalS;
@@ -126,12 +130,11 @@ class Game {
   gfx::Texture texRoad, texDetail;
   gfx::RenderTarget shadowRT, hdrRT, bloomA[5], bloomB[5], blurA, blurB;
   int rtW = 0, rtH = 0;
-  GLint locModel[16];
   // camera
   ax::Mat4 view, proj, viewProj, shadowVP; V3 camPos{-3.5f, 1.6f, 1.f}, camSmooth; bool camSmoothInit = false; float fov = 46;
   V3 riderPos; ax::Mat4 riderM;
   Palette pal{}; float night = 0, elev = 10; float bloomStrength = 0.4f, bloomThreshold = 1.05f, warm = 0;
   float exposureVal = 1.f;
-  int frameNo = 0; GLuint gpuQuery[2] = {0, 0}; bool gpuQueryOk = false;
+  int frameNo = 0;
 };
 }  // namespace pb

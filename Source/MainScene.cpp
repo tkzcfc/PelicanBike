@@ -2,7 +2,6 @@
 #include "Hud.h"
 #include "Intro.h"
 #include "Platform.h"
-#include "renderer/backend/opengl/OpenGLState.h"
 #include <cstdlib>
 #include <cstdio>
 USING_NS_AX;
@@ -140,8 +139,7 @@ void MainScene::visit(Renderer* renderer, const Mat4& parentTransform, uint32_t 
   static bool no3d = env("PB2_NO3D") != nullptr;
   if (!no3d) renderer->addCallbackCommand([this]() {
     auto fs = Director::getInstance()->getRenderView()->getFrameSize();
-    _game.render(int(fs.width), int(fs.height));
-    backend::OpenGLState::reset();
+    _game.render(int(fs.width), int(fs.height));  // records on the Renderer's backend::CommandBuffer
   }, -9000.f);  // after Director clear (-10000), before 2D (0)
   Scene::visit(renderer, parentTransform, parentFlags);
 }
