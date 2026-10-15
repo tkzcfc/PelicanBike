@@ -100,9 +100,10 @@ void MainScene::update(float dt) {
     _fps = _frames / _acc;
     if (_adaptive) _game.adaptQuality(_fps);
     auto& st = _game.lastStats;
-    char buf[256];
-    snprintf(buf, sizeof(buf), "%.0f FPS  %.2f ms  scale %.2f\nupdate %.2f ms  render(cpu) %.2f ms  gpu %.2f ms\n3D draws %d  passes %d  tris %.0fk",
-             _fps, 1000.f * _acc / _frames, _game.settings.renderScale, _sumUpd / _frames, _sumRen / _frames, _sumGpu / _frames, st.draws, st.passes, st.tris / 1000.f);
+    char buf[320];
+    snprintf(buf, sizeof(buf), "%.0f FPS  %.2f ms  scale %.2f\nupdate %.2f ms  render(cpu) %.2f ms  gpu %.2f ms\n3D draws %d  passes %d  tris %.0fk\n2D batches %u  verts %u  rt %dx%d",
+             _fps, 1000.f * _acc / _frames, _game.settings.renderScale, _sumUpd / _frames, _sumRen / _frames, _sumGpu / _frames, st.draws, st.passes, st.tris / 1000.f,
+             unsigned(Director::getInstance()->getRenderer()->getDrawnBatches()), unsigned(Director::getInstance()->getRenderer()->getDrawnVertices()), _game.targetW(), _game.targetH());
     _perf = buf;
     AXLOGI("[pb2] {}", std::string(buf));
     _acc = 0; _frames = 0; _sumUpd = _sumRen = _sumGpu = 0;

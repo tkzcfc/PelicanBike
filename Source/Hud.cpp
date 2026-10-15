@@ -17,9 +17,9 @@ static const char* ACH_T[][3] = {{"fish1", "第一条鱼", "张嘴就是干饭"}
 
 Label* Hud::label(Node* parent, const std::string& s, float size, Vec2 pos, Vec2 anchor, Color4B c, bool bold) {
   auto l = Label::createWithTTF(s, FONT, size); l->setAnchorPoint(anchor); l->setPosition(pos); l->setTextColor(c);
-  if (bold) l->enableBold(); parent->addChild(l, 2); return l;
+  if (bold) pb::boldLabel(l); parent->addChild(l, 2); return l;
 }
-void Hud::panel(DrawNode* d, Rect r, float rad, Color4F fill, bool stroke) {
+void Hud::panel(pb::AADrawNode* d, Rect r, float rad, Color4F fill, bool stroke) {
   std::vector<Vec2> pts; const int seg = 6;
   Vec2 c[4] = {{r.getMaxX() - rad, r.getMaxY() - rad}, {r.getMinX() + rad, r.getMaxY() - rad}, {r.getMinX() + rad, r.getMinY() + rad}, {r.getMaxX() - rad, r.getMinY() + rad}};
   for (int q = 0; q < 4; q++) for (int i = 0; i <= seg; i++) { float a = (q * 90 + i * 90.f / seg) * M_PI / 180; pts.push_back(c[q] + Vec2(std::cos(a), std::sin(a)) * rad); }
@@ -30,7 +30,7 @@ void Hud::panel(DrawNode* d, Rect r, float rad, Color4F fill, bool stroke) {
 
 bool Hud::init() {
   Node::init(); _sz = Director::getInstance()->getVisibleSize();
-  _bg = DrawNode::create(); addChild(_bg, 0); _bgDim = DrawNode::create(); addChild(_bgDim, 0); _dyn = DrawNode::create(); addChild(_dyn, 1); _static = Node::create(); addChild(_static, 2); _staticDim = Node::create(); _staticDim->setCascadeOpacityEnabled(true); addChild(_staticDim, 2); _dynDim = DrawNode::create(); addChild(_dynDim, 1);
+  _bg = pb::AADrawNode::create(); addChild(_bg, 0); _bgDim = pb::AADrawNode::create(); addChild(_bgDim, 0); _dyn = pb::AADrawNode::create(); addChild(_dyn, 1); _static = Node::create(); addChild(_static, 2); _staticDim = Node::create(); _staticDim->setCascadeOpacityEnabled(true); addChild(_staticDim, 2); _dynDim = pb::AADrawNode::create(); addChild(_dynDim, 1);
   float W = _sz.width, H = _sz.height;
   // dash; ≤900px: .gauge 96px, val 28px, .stats 11.5px/13px gap 3px 10px (index.html @media)
   _narrow = W <= 900; const float G = _narrow ? 96 : 124, gc = 16 + 12 + G / 2, sw = _narrow ? 78 : 112, dy = _narrow ? 19.5f : 24, vf = _narrow ? 13 : 15;
@@ -53,13 +53,13 @@ bool Hud::init() {
   _pause = label(this, "已暂停 · 按 P 继续", 22, {W / 2, H / 2}, {0.5f, 0.5f}, TEXT, true); _pause->setVisible(false);
   _pop = label(this, "", 22, {0, 0}, {0.5f, 0.5f}, ACCENT, true); _pop->setVisible(false); _pop->enableOutline(Color4B(0, 0, 0, 120), 2);
   for (int i = 0; i < 5; i++) _camBtns.push_back(label(this, CAMS[i], 13, {0, 0}, {0.5f, 0.5f}, MUTED));
-  _touchD = DrawNode::create(); addChild(_touchD, 5);
+  _touchD = pb::AADrawNode::create(); addChild(_touchD, 5);
   rebuildStatic(); buildSettings(); buildHelp();
   return true;
 }
 
 // index.html .tools SVG icons (feather-style 18px strokes), drawn as vectors
-static void drawToolIcon(DrawNode* d, int i, Vec2 c) {
+static void drawToolIcon(pb::AADrawNode* d, int i, Vec2 c) {
   const Color4F k(0.957f, 0.965f, 0.984f, 1); const float w = 0.85f;
   auto L = [&](float a, float b, float e, float f) { d->drawSegment(c + Vec2(a, -b), c + Vec2(e, -f), w, k); };
   auto R = [&](float x0, float y0, float x1, float y1) { L(x0, y0, x1, y0); L(x1, y0, x1, y1); L(x1, y1, x0, y1); L(x0, y1, x0, y0); };
@@ -99,7 +99,7 @@ void Hud::rebuildStatic() {
   float x = W / 2 - tot / 2, cy = H - 14 - 22; if (narrow) { x = 16; cy -= 58 - 2; } panel(_bg, narrow ? Rect(16, cy - 20, W - 32, 40) : Rect(x, cy - 22, tot, 44), 16, GLASS); x += 5;
   for (int i = 0; i < 5; i++) { Rect r(x, cy - (narrow ? 15 : 16), ws[i], narrow ? 30 : 32); _camBtns[i]->setScale(cfs / 13); if (_g->camMode == i) panel(_bg, r, 10, Color4F(1, 0.75f, 0.42f, 1), false);
     _camBtns[i]->setPosition(r.getMidX(), r.getMidY()); _camBtns[i]->setTextColor(_g->camMode == i ? Color4B(26, 18, 6, 255) : MUTED);
-    if (_g->camMode == i) _camBtns[i]->enableBold(); else _camBtns[i]->disableEffect(LabelEffect::BOLD);
+    if (_g->camMode == i) pb::boldLabel(_camBtns[i]); else _camBtns[i]->disableEffect(LabelEffect::BOLD);
     _btns.push_back({r, [this, i]() { _g->setCamMode(i); }}); x += ws[i] + 4; }
   // tools (top right): 截图 音乐 分享 全屏 参数 帮助 GitHub
   const int NT = 7; float tw = NT * 44 + 8; Rect tp(W - 16 - tw, H - 14 - 50, tw, 50); panel(_bg, tp, 16, GLASS);
@@ -152,7 +152,7 @@ void Hud::buildSettings() {
   _settingsBtns.clear(); _sliders.erase(std::remove_if(_sliders.begin(), _sliders.end(), [](const Slider& q) { return q.set; }), _sliders.end());
   { std::vector<Row> vis; int fi = -1; for (auto& r : rows) { bool hdr = !r.v && !r.b && !r.e; if (hdr) fi++; if (hdr || (_openMask >> fi & 1)) { vis.push_back(r); if (hdr) vis.back().ne = fi; } } rows = vis; }
   float rw = 300, rh = 24, ph = rows.size() * rh + 44, x0 = W - 16 - rw, y0 = H - 76 - ph;
-  _settings = Node::create(); addChild(_settings, 5); auto d = DrawNode::create(); _settings->addChild(d); panel(d, Rect(x0, y0, rw, ph), 12, GLASS_S);
+  _settings = Node::create(); addChild(_settings, 5); auto d = pb::AADrawNode::create(); _settings->addChild(d); panel(d, Rect(x0, y0, rw, ph), 12, GLASS_S);
   label(_settings, "参数面板", 14, {x0 + 12, y0 + ph - 18}, {0, 0.5f}, TEXT, true);
   for (size_t i = 0; i < rows.size(); i++) { auto& r = rows[i]; float y = y0 + ph - 44 - i * rh;
     if (!r.v && !r.b && !r.e) { int fi = r.ne; bool open = _openMask >> fi & 1; label(_settings, std::string(open ? "- " : "+ ") + (r.name + 4), 12, {x0 + 12, y}, {0, 0.5f}, ACCENT, true);
@@ -165,13 +165,13 @@ void Hud::buildSettings() {
     else { int* e = r.e; int ne = r.ne; _settingsBtns.push_back({hit, [this, e, ne]() { *e = (*e + 1) % ne; if (ne == 4) _g->applyQuality(*e); }}); }
   }
   _settingsRect = Rect(x0, y0, rw, ph);
-  _settingsDyn = DrawNode::create(); _settings->addChild(_settingsDyn, 1);
+  _settingsDyn = pb::AADrawNode::create(); _settings->addChild(_settingsDyn, 1);
   _settingsVal = Node::create(); _settings->addChild(_settingsVal, 2); _rows = rows.size(); _rowsY0 = y0 + ph - 44; _rowH = rh;
   _settingsRows.clear(); for (auto& r : rows) _settingsRows.push_back({r.v, r.b, r.e, r.ne});
   _settings->setVisible(wasVisible);
 }
 void Hud::buildHelp() {
-  float W = _sz.width, H = _sz.height; _help = Node::create(); addChild(_help, 6); auto d = DrawNode::create(); _help->addChild(d);
+  float W = _sz.width, H = _sz.height; _help = Node::create(); addChild(_help, 6); auto d = pb::AADrawNode::create(); _help->addChild(d);
   d->drawSolidRect(Vec2(0, 0), Vec2(W, H), Color4F(0, 0, 0, 0.35f)); Rect p(W / 2 - 280, H / 2 - 170, 560, 340); panel(d, p, 16, GLASS_S);
   label(_help, "操作说明", 18, {p.getMinX() + 24, p.getMaxY() - 30}, {0, 0.5f}, TEXT, true);
   const char* items[] = {"W/↑ 加速", "S/↓ 刹车（滑行有棘轮声）", "A/D 左右变道抓鱼", "空格 跳跃", "T 放手展翅 + 抬前轮", "B 按车铃", "H 鹈鹕大叫", "C 切换镜头", "Q/E 手动换挡", "N 时间快进 3 小时",
@@ -187,7 +187,7 @@ void Hud::emoSprite(Node* parent, const std::string& name, float px, Vec2 pos) {
 }
 
 void Hud::toast(const std::string& title, const std::string& sub, const std::string& emo) {
-  auto n = Node::create(); addChild(n, 8); auto d = DrawNode::create(); n->addChild(d);
+  auto n = Node::create(); addChild(n, 8); auto d = pb::AADrawNode::create(); n->addChild(d);
   float tx = 16; if (!emo.empty()) if (auto sp = Sprite::create("emoji/" + emo + ".png")) { sp->setScale(EMO_PX / sp->getContentSize().width); sp->setPosition(12 + EMO_PX / 2, 10); n->addChild(sp); tx = 12 + EMO_PX + 10; }
   auto t = label(n, title, 14, {tx, 12}, {0, 0}, TEXT, true); auto s = label(n, sub, 12, {tx, -8}, {0, 0}, MUTED);
   float w = std::max(t->getContentSize().width, s->getContentSize().width) + tx + 16;
@@ -328,7 +328,7 @@ void Hud::touchUp(int id) { if (_dragging && id == _dragTouch) mouseUp(); if (_t
 
 void Hud::gatherBlur(std::vector<pb::Game::BlurRect>& out) {
   for (auto it = _glass.begin(); it != _glass.end();) {
-    DrawNode* d = it->first;
+    pb::AADrawNode* d = it->first;
     if (d->getReferenceCount() == 1) { d->release(); it = _glass.erase(it); continue; }  // node was dropped from the HUD
     bool vis = d->getParent() != nullptr; for (Node* n = d; n && vis; n = n->getParent()) vis = n->isVisible();
     float op = d->getDisplayedOpacity() / 255.f;

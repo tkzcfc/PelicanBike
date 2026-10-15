@@ -41,6 +41,7 @@ class Game {
   bool init(int winW, int winH);
   void update(float dt);
   void render(int winW, int winH);  // called from the Axmol CallbackCommand
+  int targetW() const { return rtW; } int targetH() const { return rtH; }  // HDR scene target size (device px * renderScale)
   Keys keys; RideState S; Settings settings;
   enum { CAM_ORBIT, CAM_CHASE, CAM_SIDE, CAM_CINE, CAM_POV, CAM_N };
   int camMode = CAM_CHASE;

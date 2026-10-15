@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 /****************************************************************************
@@ -38,7 +40,26 @@
 #   include "doctest/doctest.h"
 #endif
 
+#if AX_TARGET_PLATFORM == AX_PLATFORM_WASM
+#    include <emscripten.h>
+#    include <emscripten/html5.h>
+#endif
+
 using namespace ax;
+
+// Device pixels per CSS/design pixel. WASM: window.devicePixelRatio (override ?dpr=1|2|3), desktop: PB2_DPR
+// (simulates a HiDPI screen). The canvas/window backing store is design*dpr device pixels so nothing is
+// upscaled by the browser/compositor; UI keeps its design-unit layout via SHOW_ALL.
+static float deviceScale() {
+    float d = 1.f;
+#if AX_TARGET_PLATFORM == AX_PLATFORM_WASM
+    d = float(emscripten_get_device_pixel_ratio());
+    d = float(EM_ASM_DOUBLE({ var v = parseFloat(new URLSearchParams(location.search).get('dpr')); return v > 0 ? v : $0; }, d));
+#else
+    if (const char* e = std::getenv("PB2_DPR")) d = float(std::atof(e));
+#endif
+    return std::max(1.f, std::min(3.f, d > 0 ? d : 1.f));
+}
 
 static ax::Size designResolutionSize = ax::Size(1280, 720);
 
@@ -67,8 +88,13 @@ bool AppDelegate::applicationDidFinishLaunching()
     if (!renderView)
     {
 #if (AX_TARGET_PLATFORM != AX_PLATFORM_ANDROID) && (AX_TARGET_PLATFORM != AX_PLATFORM_IOS)
+        const float dpr = deviceScale();
         renderView = RenderViewImpl::createWithRect(
-            "PelicanBike", ax::Rect(0, 0, designResolutionSize.width, designResolutionSize.height));
+            "PelicanBike", ax::Rect(0, 0, std::round(designResolutionSize.width * dpr), std::round(designResolutionSize.height * dpr)));
+#    if AX_TARGET_PLATFORM == AX_PLATFORM_WASM
+        // backing store = CSS size * DPR; keep the on-page size in CSS px
+        emscripten_set_element_css_size("#canvas", designResolutionSize.width, designResolutionSize.height);
+#    endif
 #else
         renderView = RenderViewImpl::create("PelicanBike");
 #endif
@@ -84,6 +110,11 @@ bool AppDelegate::applicationDidFinishLaunching()
     // Set the design resolution
     renderView->setDesignResolutionSize(designResolutionSize.width, designResolutionSize.height,
                                     ResolutionPolicy::SHOW_ALL);
+    // rasterize TTF glyphs (and size sprite textures) at framebuffer pixels instead of design pixels,
+    // otherwise SHOW_ALL magnifies 1x glyph atlases on HiDPI / large windows
+    director->setContentScaleFactor(std::max(renderView->getScaleX(), renderView->getScaleY()));
+    AXLOGI("[pb2] frame {}x{} design {}x{} contentScale {}", renderView->getFrameSize().width, renderView->getFrameSize().height,
+           designResolutionSize.width, designResolutionSize.height, director->getContentScaleFactor());
 
 #if !_AX_TESTS
     // create a scene. it's an autorelease object

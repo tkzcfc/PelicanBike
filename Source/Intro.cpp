@@ -4,13 +4,13 @@ static inline float lerpf(float a, float b, float t) { return a + (b - a) * t; }
 USING_NS_AX;
 static const char* FONT = "fonts/NotoSansSC-Regular.ttf";
 static Color4F hexF(uint32_t h, float a = 1) { return Color4F(((h >> 16) & 255) / 255.f, ((h >> 8) & 255) / 255.f, (h & 255) / 255.f, a); }
-static void rrect(DrawNode* d, Rect r, float rad, Color4F fill, Color4F stroke, float sw = 1) {
+static void rrect(pb::AADrawNode* d, Rect r, float rad, Color4F fill, Color4F stroke, float sw = 1) {
   std::vector<Vec2> pts; const int seg = 8; rad = std::min(rad, std::min(r.size.width, r.size.height) / 2);
   Vec2 c[4] = {{r.getMaxX() - rad, r.getMaxY() - rad}, {r.getMinX() + rad, r.getMaxY() - rad}, {r.getMinX() + rad, r.getMinY() + rad}, {r.getMaxX() - rad, r.getMinY() + rad}};
   for (int q = 0; q < 4; q++) for (int i = 0; i <= seg; i++) { float a = (q * 90 + i * 90.f / seg) * M_PI / 180; pts.push_back(c[q] + Vec2(std::cos(a), std::sin(a)) * rad); }
   d->drawPolygon(pts.data(), pts.size(), fill, stroke.a > 0 ? sw : 0, stroke);
 }
-float layoutKbdLine(Node* parent, DrawNode* d, const std::vector<std::string>& toks, float cx, float y, float fs, Color4B tc, bool measureOnly) {
+float layoutKbdLine(Node* parent, pb::AADrawNode* d, const std::vector<std::string>& toks, float cx, float y, float fs, Color4B tc, bool measureOnly) {
   struct It { std::string s; bool key; float w; Label* l; }; std::vector<It> its; float W = 0;
   for (auto& t : toks) { bool key = !t.empty() && t[0] == '\x01'; std::string s = key ? t.substr(1) : t;
     auto l = Label::createWithTTF(s, FONT, key ? fs - 1 : fs); if (key) l->enableBold(); float w = l->getContentSize().width + (key ? 12 : 0); w = key ? std::max(w, 22.f) : w;
@@ -25,8 +25,8 @@ float layoutKbdLine(Node* parent, DrawNode* d, const std::vector<std::string>& t
 bool Intro::init() {
   Node::init(); _sz = Director::getInstance()->getVisibleSize(); float W = _sz.width, H = _sz.height; _compact = H < 620; float artW = std::min(300.f, W * 0.7f); (void)artW;
   setCascadeOpacityEnabled(true);
-  _bg = DrawNode::create(); addChild(_bg, 0); _art = DrawNode::create(); addChild(_art, 1); _ui = Node::create(); _ui->setCascadeOpacityEnabled(true); addChild(_ui, 2);
-  auto lab = [&](const std::string& s, float size, float x, float yTop, Color4B c, bool bold = false) { auto l = Label::createWithTTF(s, FONT, size); l->setAnchorPoint({0.5f, 0.5f}); l->setPosition(x, H - yTop); l->setTextColor(c); if (bold) l->enableBold(); _ui->addChild(l, 3); return l; };
+  _bg = pb::AADrawNode::create(); addChild(_bg, 0); _art = pb::AADrawNode::create(); addChild(_art, 1); _ui = Node::create(); _ui->setCascadeOpacityEnabled(true); addChild(_ui, 2);
+  auto lab = [&](const std::string& s, float size, float x, float yTop, Color4B c, bool bold = false) { auto l = Label::createWithTTF(s, FONT, size); l->setAnchorPoint({0.5f, 0.5f}); l->setPosition(x, H - yTop); l->setTextColor(c); if (bold) pb::boldLabel(l); _ui->addChild(l, 3); return l; };
   const Color4B MUTED(236, 240, 250, 168);
   float y = _compact ? 30 : 45; float artH = _compact ? 0 : 190; y += artH + 6;
   // title: per-glyph gradient #fff7e6 -> #ffc27a (45%) -> #ff8a5b (CSS linear-gradient 92deg)
@@ -54,7 +54,7 @@ bool Intro::init() {
     lab("开始骑行 ▶", _compact ? 15 : 17, _bStart.getMidX(), y + bh / 2, Color4B(42, 20, 0, 255), true); lab("静音进入", _compact ? 13 : 15, _bMute.getMidX(), y + bh / 2, Color4B(244, 246, 251, 255));
     y += bh + 20; }
   if (H >= 420) {
-    auto keys = DrawNode::create(); _ui->addChild(keys, 2);
+    auto keys = pb::AADrawNode::create(); _ui->addChild(keys, 2);
     std::vector<std::vector<std::string>> L = {{"\x01W", "\x01S", " 加速 / 刹车　", "\x01" "A", "\x01" "D", " 变道抓鱼　", "\x01空格", " 跳跃　", "\x01T", " 放手特技"},
                                                {"\x01" "B", " 按铃　", "\x01H", " 鹈鹕大叫　", "\x01" "C", " 切换镜头　", "\x01N", " 快进 3 小时　点击鹈鹕 / 车铃 / 海面都有惊喜"}};
     if (W < 760) L = {{"\x01W", "\x01S", " 加速 / 刹车　", "\x01" "A", "\x01" "D", " 变道抓鱼"}, {"\x01空格", " 跳跃　", "\x01T", " 放手特技　", "\x01" "B", " 按铃"},
@@ -85,9 +85,10 @@ void Intro::tick(float dt) {
   static bool bgDone = false; (void)bgDone;
   if (_t == dt || _starting) { /* rebuild bg with fade alpha */ }
   _art->drawSolidRect(Vec2(0, 0), Vec2(W, H), Color4F(0, 0, 0, 0));
-  { const int N = 24; for (int i = 0; i < N; i++) { float u0 = float(i) / N, u1 = float(i + 1) / N; float a = (0.62f + (0.86f - 0.62f) * (u0 + u1) / 2) * op;
+  { const int N = 72; for (int i = 0; i < N; i++) { float u0 = float(i) / N, u1 = float(i + 1) / N; float a = (0.62f + (0.86f - 0.62f) * (u0 + u1) / 2) * op;
       Color4F c(lerpf(10, 8, u0) / 255.f, lerpf(14, 10, u0) / 255.f, lerpf(30, 22, u0) / 255.f, a); _art->drawSolidRect(Vec2(0, H * (1 - u1)), Vec2(W, H * (1 - u0)), c); }
-    Vec2 rc(W * 0.7f, H * 0.9f); for (int k = 40; k >= 1; k--) { float r = W * 0.6f * k / 40; _art->drawSolidCircle(rc, r, 0, 64, 1, 0.75f, Color4F(1, 150 / 255.f, 90 / 255.f, 0.007f * op)); } }
+    // 40 faint (a=0.007) overlapping glow discs: stock hard-edged fill, AA fringe is invisible there and costs ~40x160 tris
+    Vec2 rc(W * 0.7f, H * 0.9f); for (int k = 40; k >= 1; k--) { float r = W * 0.6f * k / 40; _art->DrawNode::drawSolidCircle(rc, r, 0, 64, 1, 0.75f, Color4F(1, 150 / 255.f, 90 / 255.f, 0.007f * op)); } }
   if (!_compact) {  // SVG art (viewBox 300x190) -> screen
     float ox = W / 2 - 150, oy = H - 45 - _off; auto P = [&](float x, float y) { return Vec2(ox + x, oy - y); };
     // road (dashed, moving)

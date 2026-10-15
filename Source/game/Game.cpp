@@ -697,7 +697,8 @@ void Game::render(int winW, int winH) {
   finalS.set4("uGrade", bf[4], 0.28f, warm, 0.035f);
   float fbH = float(vpY + vpH);  // framebuffer height (Metal gl_FragCoord flip)
   finalS.set4("uExpTime", exposureVal, S.t, float(nBlur), fbH); if (frameNo == 60) AXLOGI("[pb2] exp {} warm {} bloomS {} thr {}", exposureVal, warm, bloomStrength, bloomThreshold);
-  { float R[24 * 4] = {0}, P[24 * 4] = {0}; float sx = float(vpW) / std::max(1, winW), sy = float(vpH) / std::max(1, winH);
+  { float R[24 * 4] = {0}, P[24 * 4] = {0}; const auto ds = ax::Director::getInstance()->getVisibleSize();  // blur rects are in design units (HUD world space), not frame px
+    float sx = float(vpW) / std::max(1.f, ds.width), sy = float(vpH) / std::max(1.f, ds.height);
     for (int i = 0; i < nBlur; i++) { auto& b = blurRects[i]; R[i * 4] = b.x0 * sx + vpX; R[i * 4 + 1] = b.y0 * sy + vpY; R[i * 4 + 2] = b.x1 * sx + vpX; R[i * 4 + 3] = b.y1 * sy + vpY;
       P[i * 4] = b.rad * sx; P[i * 4 + 1] = b.amount; P[i * 4 + 2] = sx; P[i * 4 + 3] = 0; }
     if (nBlur) { finalS.set("uRects", R, size_t(nBlur) * 16); finalS.set("uRectP", P, size_t(nBlur) * 16); } }
